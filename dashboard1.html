@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard1: a_classic_claimed vs a_classic_sim</title>
+<style>
+  :root {
+    --bg-primary: #050505;
+    --bg-secondary: #151515;
+    --bg-tertiary: #252525;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-tertiary: #64748b;
+    --border-color: #1f2937;
+    --accent-blue: #3b82f6;
+    --accent-amber: #f59e0b;
+    --accent-teal: #14b8a6;
+    --accent-rose: #f43f5e;
+    --accent-purple: #a78bfa;
+    --card-radius: 2px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "SF Mono", "Fira Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    /* font-family: var(--font-sans); */
+    font-family: var(--font-mono);
+    line-height: 1.45;
+  }
+  .container {
+    max-width: 1380px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 12px;
+  }
+  .header h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .header p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .kpi-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--card-radius);
+    padding: 14px 16px;
+  }
+  .kpi-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .kpi-val {
+    font-size: 24px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    margin: 4px 0 2px;
+  }
+  .kpi-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+  }
+  .controls-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--card-radius);
+    padding: 10px 14px;
+  }
+  .btn-group {
+    display: inline-flex;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 6px 11px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn.active {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  }
+  .search-input {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 6px 10px;
+    border-radius: 2px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    min-width: 220px;
+  }
+  .quick-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+    align-items: center;
+  }
+  .chip {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 4px 8px;
+    border-radius: 5px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+  }
+  .chip:hover, .chip.active {
+    border-color: var(--accent-amber);
+    color: var(--text-primary);
+  }
+  .card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--card-radius);
+    padding: 16px;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .legend {
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    align-items: center;
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+  .split-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 980px) {
+    .split-grid { grid-template-columns: 1fr; }
+  }
+  canvas {
+    width: 100%;
+    display: block;
+    cursor: pointer;
+  }
+  .table-wrap {
+    max-height: 440px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+  th, td {
+    padding: 7px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child,
+  th:nth-child(2), td:nth-child(2) {
+    text-align: left;
+  }
+  th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    z-index: 1;
+  }
+  tr.gal-row {
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  tr.gal-row:hover {
+    background: var(--bg-tertiary);
+  }
+  tr.gal-row.selected {
+    background: rgba(245, 158, 11, 0.18);
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .badge-disk {
+    background: rgba(239, 68, 68, 0.16);
+    color: #f87171;
+  }
+  .badge-bulge {
+    background: rgba(34, 197, 94, 0.18);
+    color: #4ade80;
+  }
+  #comp-group .btn.active[data-comp="all"] {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+  }
+  #comp-group .btn.active[data-comp="dsk"] {
+    background: rgba(239, 68, 68, 0.20);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.50);
+  }
+  #comp-group .btn.active[data-comp="blg"] {
+    background: rgba(34, 197, 94, 0.20);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.50);
+  }
+  #comp-group .btn.active[data-comp="gas"] {
+    background: rgba(59, 130, 246, 0.20);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.50);
+  }
+  .good { color: var(--accent-teal); }
+  .warn { color: var(--accent-amber); }
+  .bad  { color: var(--accent-rose); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1 id="main-title"> <code>a_classic</code> (Disk + Bulge + Gas) Claimed vs Sim</h1>
+      <p>Click any bar or row to inspect its radial profile.</p>
+    </div>
+  </div>
+
+  <!-- KPI Summary Row -->
+  <div class="kpi-grid" id="kpi-grid"></div>
+
+  <!-- Filter & Component Controls -->
+  <div class="controls-bar">
+    <div class="btn-group" id="comp-group">
+      <button class="btn active" data-comp="all">All (Disk + Bulge + Gas)</button>
+      <button class="btn" data-comp="dsk">Disk Only</button>
+      <button class="btn" data-comp="blg">Bulge Only</button>
+      <button class="btn" data-comp="gas">Gas Only</button>
+    </div>
+    <input type="text" class="search-input" id="search-input" placeholder="Search galaxy (e.g. UGC07524, NGC5005)...">
+    <div class="quick-chips">
+      <span style="font-size:11px;color:var(--text-tertiary);">Quick inspect:</span>
+      <span class="chip" data-gal="UGC07524">UGC07524</span>
+      <span class="chip" data-gal="UGC04483">UGC04483</span>
+      <span class="chip" data-gal="NGC5005">NGC5005</span>
+      <span class="chip" data-gal="NGC2841">NGC2841</span>
+      <span class="chip" data-gal="NGC2903">NGC2903</span>
+      <span class="chip" data-gal="UGC09037">UGC09037</span>
+      <span class="chip" data-gal="F574-1">F574-1</span>
+    </div>
+  </div>
+
+  <!-- Overview Bar Chart of All 175 Galaxies -->
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title" id="overview-title">All 175 Galaxies Ranked by Mean |diff_sim|</h2>
+      <div class="legend" id="overview-legend"></div>
+    </div>
+    <canvas id="overview-canvas" height="230"></canvas>
+  </div>
+
+  <!-- Selected Galaxy Radial Inspector + Point-by-Point Table -->
+  <div class="split-grid">
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title" id="inspector-title">Radial Profile Inspector</h2>
+        <div class="legend" id="inspector-legend"></div>
+      </div>
+      <canvas id="profile-canvas" height="280"></canvas>
+      <div id="inspector-meta" style="margin-top:10px;font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title" id="pt-table-title">Point-by-Point Radial Comparison</h2>
+      </div>
+      <div class="table-wrap" style="max-height:315px;">
+        <table id="pt-table">
+          <thead>
+            <tr id="pt-table-head">
+              <th>k</th>
+              <th>r (m)</th>
+              <th>SB (W/m&sup2;)</th>
+              <th>a_classic_claimed (m/s&sup2;)</th>
+              <th>a_classic_sim (m/s&sup2;)</th>
+              <th>diff_sim</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full 175-Galaxy Sortable Table -->
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title" id="bench-table-title">Complete 175-Galaxy Benchmark Table</h2>
+      <span style="font-size:12px;color:var(--text-tertiary);">Click any column header to sort; click any row to inspect</span>
+    </div>
+    <div class="table-wrap">
+      <table id="gal-table">
+        <thead>
+          <tr>
+            <th data-sort="name">Galaxy</th>
+            <th data-sort="has_blg">has_blg</th>
+            <th data-sort="n">Pts</th>
+            <th data-sort="rmax">rmax (m)</th>
+            <th data-sort="r_dsk_efold">r_dsk_efold (m)</th>
+            <th data-sort="z_dsk">z_dsk (m)</th>
+            <th data-sort="sb_dsk_max">sb_dsk_max (W/m&sup2;)</th>
+            <th data-sort="sb_blg_max">sb_blg_max (W/m&sup2;)</th>
+            <th data-sort="sb_gas_peak">sb_gas_peak (W/m&sup2;)</th>
+            <th data-sort="meanAbsAll">Mean |diff_sim|</th>
+            <th data-sort="k0Pct">k=0 diff</th>
+            <th data-sort="lastPct">Outer diff</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="./data_dashboard1.js"></script>
+<script>
+
+(function() {
+  let currentComp = 'all'; // 'all' | 'dsk' | 'blg' | 'gas'
+  let searchQuery = '';
+  let selectedGalaxyName = 'NGC5005';
+  let sortKey = 'meanAbsAll';
+  let sortAsc = true;
+  let overviewBars = [];
+
+  const COLOR_DSK = '#ef4444'; // Red   (Disk)
+  const COLOR_BLG = '#22c55e'; // Green (Bulge)
+  const COLOR_GAS = '#3b82f6'; // Blue  (Gas)
+  const COLOR_ALL = '#ffffff'; // White (All = Disk + Bulge + Gas)
+
+  const COMP_META = {
+    all: {
+      title: 'Dashboard1: <code>a_classic_tot_claimed</code> vs <code>a_classic_tot_sim</code> (Disk + Bulge + Gas)',
+      claimedLabel: 'a_classic_tot_claimed',
+      simLabel: 'a_classic_tot_sim',
+      sbLabel: 'SB_tot (W/m&sup2;)',
+      simColor: COLOR_ALL,
+      barColor: '#94a3b8',
+      dotColor: COLOR_ALL,
+      dashed: true
+    },
+    dsk: {
+      title: 'Dashboard1: <code>a_classic_dsk_claimed</code> vs <code>a_classic_dsk_sim</code> (3D Voxel Disk)',
+      claimedLabel: 'a_classic_dsk_claimed',
+      simLabel: 'a_classic_dsk_sim',
+      sbLabel: 'SB_dsk (W/m&sup2;)',
+      simColor: COLOR_DSK,
+      barColor: COLOR_DSK,
+      dotColor: '#ffffff',
+      dashed: false
+    },
+    blg: {
+      title: 'Dashboard1: <code>a_classic_blg_claimed</code> vs <code>a_classic_blg_sim</code> (3D Voxel Bulge)',
+      claimedLabel: 'a_classic_blg_claimed',
+      simLabel: 'a_classic_blg_sim',
+      sbLabel: 'SB_blg (W/m&sup2;)',
+      simColor: COLOR_BLG,
+      barColor: COLOR_BLG,
+      dotColor: '#ffffff',
+      dashed: false
+    },
+    gas: {
+      title: 'Dashboard1: <code>a_classic_gas_claimed</code> vs <code>a_classic_gas_sim</code> (3D Voxel Flared Gas Disk)',
+      claimedLabel: 'a_classic_gas_claimed',
+      simLabel: 'a_classic_gas_sim',
+      sbLabel: 'SB_gas (W/m&sup2;)',
+      simColor: COLOR_GAS,
+      barColor: COLOR_GAS,
+      dotColor: '#ffffff',
+      dashed: false
+    }
+  };
+
+  function getStat(gal, key) {
+    if (gal.stats && gal.stats[currentComp] && gal.stats[currentComp][key] !== undefined) {
+      return gal.stats[currentComp][key];
+    }
+    return gal[key] || 0;
+  }
+
+  function median(arr) {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
+  function mean(arr) {
+    if (!arr.length) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }
+
+  function renderKPIs() {
+    const activePool = currentComp === 'blg' ? DATA.filter(d => d.has_blg) : DATA;
+    const mAll = median(activePool.map(d => getStat(d, 'meanAbsAll')));
+    const avgAll = mean(activePool.map(d => getStat(d, 'meanAbsAll')));
+    const under5 = activePool.filter(d => getStat(d, 'meanAbsAll') < 5).length;
+    const under10 = activePool.filter(d => getStat(d, 'meanAbsAll') < 10).length;
+
+    document.getElementById('kpi-grid').innerHTML = `
+      <div class="kpi-card">
+        <div class="kpi-label">Median Mean |diff_sim|</div>
+        <div class="kpi-val good">${mAll.toFixed(2)}%</div>
+        <div class="kpi-sub">Across ${activePool.length} galaxies</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Mean |diff_sim|</div>
+        <div class="kpi-val">${avgAll.toFixed(2)}%</div>
+        <div class="kpi-sub">Across ${activePool.length} galaxies</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Galaxies Within 5% / 10%</div>
+        <div class="kpi-val">${under5} / ${under10}</div>
+        <div class="kpi-sub">${((under5/activePool.length)*100).toFixed(1)}% &lt; 5% | ${((under10/activePool.length)*100).toFixed(1)}% &lt; 10%</div>
+      </div>
+    `;
+  }
+
+  function getFilteredData() {
+    return DATA.filter(d => {
+      if (currentComp === 'blg' && !d.has_blg) return false;
+      if (searchQuery && !d.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+  }
+
+  function drawOverviewChart() {
+    const canvas = document.getElementById('overview-canvas');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width || 900;
+    const H = 230;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const axisColor = 'rgba(255,255,255,0.12)';
+    const textColor = '#94a3b8';
+
+    ctx.clearRect(0, 0, W, H);
+
+    const meta = COMP_META[currentComp];
+    const filtered = [...getFilteredData()].sort((a, b) => getStat(a, 'meanAbsAll') - getStat(b, 'meanAbsAll'));
+    const compNames = { all: 'All (Disk+Bulge+Gas)', dsk: 'Disk Only', blg: 'Bulge Only', gas: 'Gas Only' };
+    document.getElementById('overview-title').textContent =
+      `Ranked Overview [${compNames[currentComp]}] (${filtered.length} Galaxies) — Sorted by Mean |diff_sim|`;
+    document.getElementById('overview-legend').innerHTML = `
+      <span><i class="legend-dot" style="background:${meta.barColor}"></i>${compNames[currentComp]}</span>
+      <span><i class="legend-dot" style="background:${COLOR_ALL}"></i>Selected Galaxy</span>
+    `;
+
+    const ml = 46, mr = 16, mt = 16, mb = 32;
+    const pw = W - ml - mr;
+    const ph = H - mt - mb;
+    const maxVal = Math.max(15, ...filtered.map(d => Math.min(25, getStat(d, 'meanAbsAll'))));
+
+    const ticks = [0, 5, 10, 15, 20];
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ticks.forEach(t => {
+      if (t > maxVal) return;
+      const y = mt + ph - (t / maxVal) * ph;
+      ctx.strokeStyle = t === 5 ? 'rgba(255,255,255,0.30)' : axisColor;
+      ctx.setLineDash(t === 5 ? [4, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(ml, y);
+      ctx.lineTo(ml + pw, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = textColor;
+      ctx.fillText(t + '%', ml - 6, y + 3);
+    });
+
+    overviewBars = [];
+    const n = filtered.length || 1;
+    const barStep = pw / n;
+    const barW = Math.max(1.5, barStep - (n > 80 ? 1 : 2));
+
+    filtered.forEach((d, idx) => {
+      const val = getStat(d, 'meanAbsAll');
+      const clamped = Math.min(maxVal, val);
+      const bh = (clamped / maxVal) * ph;
+      const bx = ml + idx * barStep;
+      const by = mt + ph - bh;
+
+      ctx.fillStyle = d.name === selectedGalaxyName ? COLOR_ALL : meta.barColor;
+      ctx.fillRect(bx, by, barW, Math.max(2, bh));
+      overviewBars.push({ x: bx, w: barStep, gal: d });
+    });
+
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'center';
+    ctx.fillText('Galaxies ranked from lowest to highest mean |diff_sim| (click any bar to inspect)', ml + pw / 2, H - 8);
+  }
+
+  function drawProfileInspector() {
+    const gal = DATA.find(d => d.name === selectedGalaxyName) || DATA[0];
+    if (!gal) return;
+
+    const meta = COMP_META[currentComp];
+    document.getElementById('main-title').innerHTML = meta.title;
+    document.getElementById('inspector-title').textContent =
+      `${gal.name} — ${meta.claimedLabel} vs ${meta.simLabel}`;
+    document.getElementById('pt-table-title').textContent =
+      `${gal.name} — Point-by-Point Table (${gal.n} radii)`;
+
+    if (currentComp === 'all') {
+      document.getElementById('inspector-legend').innerHTML = `
+        <span><i class="legend-dot" style="background:${COLOR_ALL};border-radius:50%"></i>${meta.claimedLabel}</span>
+        <span><i class="legend-dot" style="background:transparent;border-top:2px dashed ${COLOR_ALL};height:0;width:14px"></i>${meta.simLabel}</span>
+      `;
+    } else {
+      document.getElementById('inspector-legend').innerHTML = `
+        <span><i class="legend-dot" style="background:${meta.dotColor};border-radius:50%"></i>${meta.claimedLabel}</span>
+        <span><i class="legend-dot" style="background:${meta.simColor}"></i>${meta.simLabel}</span>
+      `;
+    }
+
+    document.getElementById('pt-table-head').innerHTML = `
+      <th>k</th>
+      <th>r (m)</th>
+      <th>${meta.sbLabel}</th>
+      <th>${meta.claimedLabel} (m/s&sup2;)</th>
+      <th>${meta.simLabel} (m/s&sup2;)</th>
+      <th>diff_sim</th>
+    `;
+
+    const allVal = getStat(gal, 'meanAbsAll');
+    const blgInfo = gal.has_blg && gal.r_blg_efold
+      ? `r_blg_efold: <b>${gal.r_blg_efold.toExponential(2)} m</b> &nbsp;|&nbsp; r_blg_max: <b>${gal.r_blg_max.toExponential(2)} m</b> &nbsp;|&nbsp; `
+      : '';
+
+    document.getElementById('inspector-meta').innerHTML =
+      `has_blg: <b>${gal.has_blg}</b> &nbsp;|&nbsp; ` +
+      `rmax: <b>${gal.rmax.toExponential(2)} m</b> &nbsp;|&nbsp; ` +
+      `r_dsk_efold: <b>${gal.r_dsk_efold.toExponential(2)} m</b> &nbsp;|&nbsp; ` +
+      `z_dsk: <b>${gal.z_dsk.toExponential(2)} m</b> &nbsp;|&nbsp; ` +
+      `z_gas_outer: <b>${(gal.z_gas_outer || 0).toExponential(2)} m</b> &nbsp;|&nbsp; ` +
+      blgInfo +
+      `sb_dsk_max: <b>${gal.sb_dsk_max.toExponential(2)} W/m&sup2;</b> &nbsp;|&nbsp; ` +
+      `sb_blg_max: <b>${gal.sb_blg_max ? gal.sb_blg_max.toExponential(2) : '0'} W/m&sup2;</b> &nbsp;|&nbsp; ` +
+      `sb_gas_peak: <b>${gal.sb_gas_peak ? gal.sb_gas_peak.toExponential(2) : '0'} W/m&sup2;</b> &nbsp;|&nbsp; ` +
+      `Mean |diff_sim|: <b>${allVal.toFixed(2)}%</b>`;
+
+    const canvas = document.getElementById('profile-canvas');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width || 540;
+    const H = 280;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const gridColor = 'rgba(255,255,255,0.09)';
+    const textColor = '#94a3b8';
+
+    ctx.clearRect(0, 0, W, H);
+
+    const ml = 68, mr = 18, mt = 18, mb = 42;
+    const pw = W - ml - mr;
+    const ph = H - mt - mb;
+
+    const pts = gal.pts;
+    const rmax = gal.rmax || 1;
+    const acKey = 'ac_' + currentComp;
+    const asimKey = 'asim_' + currentComp;
+    const pctKey = 'pct_' + currentComp;
+
+    let amax = 1e-13;
+    let amin = 0;
+    pts.forEach(p => {
+      const ac = p[acKey] !== undefined ? p[acKey] : p.ac;
+      const asim = p[asimKey] !== undefined ? p[asimKey] : p.asim;
+      if (ac > amax) amax = ac;
+      if (asim > amax) amax = asim;
+      if (ac < amin) amin = ac;
+      if (asim < amin) amin = asim;
+    });
+    const yTop = amax * 1.1;
+    const yBot = amin < 0 ? amin * 1.15 : 0;
+    const ySpan = (yTop - yBot) || 1e-12;
+
+    function xpx(r) { return ml + (r / rmax) * pw; }
+    function ypx(a) { return mt + ph - ((a - yBot) / ySpan) * ph; }
+
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) {
+      const av = yBot + (i / 4) * ySpan;
+      const y = ypx(av);
+      ctx.strokeStyle = gridColor;
+      ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + pw, y); ctx.stroke();
+      ctx.fillStyle = textColor;
+      ctx.fillText(av.toExponential(1), ml - 6, y + 3);
+    }
+
+    if (yBot < 0) {
+      const y0 = ypx(0);
+      ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+      ctx.beginPath(); ctx.moveTo(ml, y0); ctx.lineTo(ml + pw, y0); ctx.stroke();
+    }
+
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 4; i++) {
+      const rv = (i / 4) * rmax;
+      const x = xpx(rv);
+      ctx.strokeStyle = gridColor;
+      ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, mt + ph); ctx.stroke();
+      ctx.fillStyle = textColor;
+      ctx.fillText(rv.toExponential(1), x, mt + ph + 15);
+    }
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.strokeRect(ml, mt, pw, ph);
+
+    ctx.fillStyle = textColor;
+    ctx.fillText('r (m)', ml + pw / 2, H - 6);
+    ctx.save();
+    ctx.translate(14, mt + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('a (m/s²)', 0, 0);
+    ctx.restore();
+
+    function plotSeries(acField, asimField, lineColor, dotColor, dashed, dotRadius) {
+      ctx.save();
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 2.0;
+      if (dashed) ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      pts.forEach((p, idx) => {
+        const cx = xpx(p.r), cy = ypx(p[asimField] || 0);
+        if (idx === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      });
+      ctx.stroke();
+      ctx.restore();
+
+      if (!dashed) {
+        pts.forEach(p => {
+          const cx = xpx(p.r), cy = ypx(p[asimField] || 0);
+          ctx.beginPath();
+          ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = lineColor;
+          ctx.fill();
+        });
+      }
+
+      if (acField && dotColor) {
+        pts.forEach(p => {
+          const cx = xpx(p.r), cy = ypx(p[acField] || 0);
+          ctx.beginPath();
+          ctx.arc(cx, cy, dotRadius || 3.8, 0, Math.PI * 2);
+          ctx.fillStyle = dotColor;
+          ctx.fill();
+        });
+      }
+    }
+
+    plotSeries(acKey, asimKey, meta.simColor, meta.dotColor, meta.dashed, 3.8);
+
+    // Populate point-by-point table
+    const tbody = document.querySelector('#pt-table tbody');
+    tbody.innerHTML = pts.map((p, idx) => {
+      const ac = p[acKey] !== undefined ? p[acKey] : p.ac;
+      const asim = p[asimKey] !== undefined ? p[asimKey] : p.asim;
+      const pct = p[pctKey] !== undefined ? p[pctKey] : p.pct;
+      const sbVal = currentComp === 'blg'
+        ? (p.sb_blg || 0)
+        : (currentComp === 'gas'
+          ? (p.sb_gas || 0)
+          : (currentComp === 'all'
+            ? (p.sb_tot !== undefined ? p.sb_tot : ((p.sb_dsk || 0) + (p.sb_blg || 0) + (p.sb_gas || 0)))
+            : (p.sb_dsk || p.sb || 0)));
+      const pctStr = pct !== null && ac !== 0 ? (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' : (ac === 0 && asim === 0 ? '0.0%' : '-');
+      const cls = ac === 0 ? '' : (Math.abs(pct) < 5 ? 'good' : (Math.abs(pct) < 12 ? 'warn' : 'bad'));
+      return `<tr>
+        <td>${idx}</td>
+        <td>${p.r.toExponential(2)}</td>
+        <td>${sbVal.toExponential(2)}</td>
+        <td>${ac.toExponential(2)}</td>
+        <td>${asim.toExponential(2)}</td>
+        <td class="${cls}">${pctStr}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderTable() {
+    const filtered = [...getFilteredData()].sort((a, b) => {
+      const isStatKey = ['meanAbsAll', 'k0Pct', 'lastPct'].includes(sortKey);
+      const va = isStatKey ? getStat(a, sortKey) : a[sortKey];
+      const vb = isStatKey ? getStat(b, sortKey) : b[sortKey];
+      if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sortAsc ? (va - vb) : (vb - va);
+    });
+
+    const tbody = document.querySelector('#gal-table tbody');
+    tbody.innerHTML = filtered.map(d => {
+      const sel = d.name === selectedGalaxyName ? 'selected' : '';
+      const all = getStat(d, 'meanAbsAll');
+      const k0 = getStat(d, 'k0Pct');
+      const last = getStat(d, 'lastPct');
+      const clsAll = all < 5 ? 'good' : (all < 10 ? 'warn' : 'bad');
+      return `<tr class="gal-row ${sel}" data-name="${d.name}">
+        <td><b>${d.name}</b></td>
+        <td><span class="badge ${d.has_blg ? 'badge-bulge' : 'badge-disk'}">${d.has_blg ? 'true' : 'false'}</span></td>
+        <td>${d.n}</td>
+        <td>${d.rmax.toExponential(2)}</td>
+        <td>${d.r_dsk_efold.toExponential(2)}</td>
+        <td>${d.z_dsk.toExponential(2)}</td>
+        <td>${d.sb_dsk_max.toExponential(2)}</td>
+        <td>${d.sb_blg_max ? d.sb_blg_max.toExponential(2) : '0'}</td>
+        <td>${d.sb_gas_peak ? d.sb_gas_peak.toExponential(2) : '0'}</td>
+        <td class="${clsAll}"><b>${all.toFixed(2)}%</b></td>
+        <td>${(k0 >= 0 ? '+' : '') + k0.toFixed(1)}%</td>
+        <td>${(last >= 0 ? '+' : '') + last.toFixed(1)}%</td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('tr.gal-row').forEach(row => {
+      row.addEventListener('click', () => {
+        selectedGalaxyName = row.getAttribute('data-name');
+        updateAll();
+      });
+    });
+  }
+
+  function updateAll() {
+    document.querySelectorAll('.chip').forEach(c => {
+      c.classList.toggle('active', c.getAttribute('data-gal') === selectedGalaxyName);
+    });
+    renderKPIs();
+    drawOverviewChart();
+    drawProfileInspector();
+    renderTable();
+  }
+
+  document.querySelectorAll('#comp-group .btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#comp-group .btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentComp = btn.getAttribute('data-comp');
+
+      // When switching to Bulge Only, ensure selected galaxy has a bulge
+      if (currentComp === 'blg') {
+        const curGal = DATA.find(d => d.name === selectedGalaxyName);
+        if (!curGal || !curGal.has_blg) {
+          selectedGalaxyName = 'NGC5005';
+        }
+      }
+      updateAll();
+    });
+  });
+
+  document.getElementById('search-input').addEventListener('input', (e) => {
+    searchQuery = e.target.value.trim();
+    updateAll();
+  });
+
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      selectedGalaxyName = chip.getAttribute('data-gal');
+      updateAll();
+    });
+  });
+
+  document.querySelectorAll('#gal-table th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const k = th.getAttribute('data-sort');
+      if (sortKey === k) sortAsc = !sortAsc;
+      else { sortKey = k; sortAsc = true; }
+      renderTable();
+    });
+  });
+
+  document.getElementById('overview-canvas').addEventListener('click', (e) => {
+    const rect = e.target.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const hit = overviewBars.find(b => x >= b.x && x <= b.x + b.w);
+    if (hit) {
+      selectedGalaxyName = hit.gal.name;
+      updateAll();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    drawOverviewChart();
+    drawProfileInspector();
+  });
+
+  updateAll();
+})();
+</script>
+</body>
+</html>

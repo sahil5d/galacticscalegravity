@@ -1,0 +1,276 @@
+<html>
+
+<head>
+    <!-- Note: The 3D render is of mass, not surfacebrightness -->
+    <title>Galaxy mass voxels estimate</title>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: monospace;
+            font-size: 10px;
+
+            /* background-color: #050505; */
+            background-color: #000000;
+            color: #fff;
+        }
+
+        #thescene {}
+
+        canvas,
+        canvas:focus {
+            outline: none;
+            border: none;
+        }
+
+        #theinfo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 12px;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        #hud-mode-bar {
+            position: fixed;
+            bottom: 510px;
+            left: 16px;
+            width: 340px;
+            display: flex;
+            gap: 4px;
+            background: rgba(10, 10, 18, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 4px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .hud-mode-btn {
+            flex: 1;
+            background: transparent;
+            color: #94a3b8;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 4px 2px;
+            font-family: monospace;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .hud-mode-btn:hover {
+            color: #f8fafc;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .hud-mode-btn.active[data-mode="all"] {
+            background: rgba(255, 255, 255, 0.16);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.55);
+        }
+
+        .hud-mode-btn.active[data-mode="dsk"] {
+            background: rgba(239, 68, 68, 0.20);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.55);
+        }
+
+        .hud-mode-btn.active[data-mode="blg"] {
+            background: rgba(34, 197, 94, 0.20);
+            color: #4ade80;
+            border-color: rgba(34, 197, 94, 0.55);
+        }
+
+        .hud-mode-btn.active[data-mode="gas"] {
+            background: rgba(59, 130, 246, 0.20);
+            color: #60a5fa;
+            border-color: rgba(59, 130, 246, 0.55);
+        }
+
+        #density-scale-bar {
+            position: fixed;
+            bottom: 476px;
+            left: 16px;
+            width: 340px;
+            display: flex;
+            gap: 4px;
+            background: rgba(10, 10, 18, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 4px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .density-scale-btn {
+            flex: 1;
+            background: transparent;
+            color: #94a3b8;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 4px 4px;
+            font-family: monospace;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .density-scale-btn:hover {
+            color: #f8fafc;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .density-scale-btn.active {
+            background: rgba(255, 255, 255, 0.14);
+            color: #f8fafc;
+            border-color: rgba(255, 255, 255, 0.35);
+        }
+
+        #accel-hud {
+            position: fixed;
+            bottom: 248px;
+            left: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            pointer-events: none;
+        }
+
+        #sb-hud {
+            position: fixed;
+            bottom: 16px;
+            left: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            pointer-events: none;
+            /* canvas background set in JS */
+        }
+    </style>
+</head>
+
+<body>
+    <div id="thescene"></div>
+
+    <div id="theinfo">
+        <b>Galaxy Mass Voxels Estimate</b> <span id="gal-label" style="color:#94a3b8;"></span><br>
+        <span id="rho-scale-info" style="font-size:11px; color:#94a3b8;"></span>
+        <!-- • Drag to rotate | Scroll to zoom<br> -->
+    </div>
+
+    <div id="hud-mode-bar">
+        <button class="hud-mode-btn active" data-mode="all" onclick="set_hud_mode('all')">All (Dsk+Blg+Gas)</button>
+        <button class="hud-mode-btn" data-mode="dsk" onclick="set_hud_mode('dsk')">Disk</button>
+        <button class="hud-mode-btn" data-mode="blg" onclick="set_hud_mode('blg')">Bulge</button>
+        <button class="hud-mode-btn" data-mode="gas" onclick="set_hud_mode('gas')">Gas</button>
+    </div>
+    <div id="density-scale-bar">
+        <button class="density-scale-btn active" data-scale="common" onclick="set_density_scale('common')">Common
+            &rho; White Scale</button>
+        <button class="density-scale-btn" data-scale="separate" onclick="set_density_scale('separate')">Separate
+            &rho; White Scale</button>
+    </div>
+    <canvas id="accel-hud" width="340" height="220"></canvas>
+    <canvas id="sb-hud" width="340" height="220"></canvas>
+
+    <script src="./js_three.min.js"></script>
+    <script src="./js_threeorbitcontrols.js"></script>
+
+    <!-- <script src="./js_d3.min.js"></script> -->
+    <!-- <script src="./js_plot.min.js"></script> -->
+
+    <script src="./lib.js"></script>
+
+    <script src="./data_sparcgalaxies.js"></script>
+    <!-- <script src="./data_bestgalaxies.js"></script> -->
+
+    <script src="./hud.js"></script>
+    <script src="./logic.js"></script>
+    <script src="./logic_dsk.js"></script>
+    <script src="./logic_blg.js"></script>
+    <script src="./logic_gas.js"></script>
+
+    <!-- SCENE SETUP -->
+    <script>
+        var scene;
+        var camera;
+        var renderer;
+        var controls;
+
+        function setup() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            camera = new THREE.PerspectiveCamera(
+                10,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000,
+                // 0.1 * 10 ** -11,
+                // 1000 * 10 ** -11
+            );
+
+            // camera.position.set(0, 0, 6 * BOHR_X);
+            // camera.position.set(25, 25, 25);
+            // camera.position.set(0, 0, 25);
+            camera.position.set(0, 0, 1200);
+            camera.lookAt(new THREE.Vector3(0, 0, 0));
+
+            camera.far *= 10;
+            camera.near *= 10;
+            camera.updateProjectionMatrix();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // optional
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 0.1;
+            controls.update();
+
+            document.querySelector("#thescene").appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        setup();
+    </script>
+
+    <!-- RUN VIZ -->
+    <script>
+        function run_post() {
+            controls.update();
+            requestAnimationFrame(run_post);
+            renderer.render(scene, camera);
+        }
+
+        if (document.getElementById('gal-label')) {
+            document.getElementById('gal-label').textContent = '\u2014 ' + thegal;
+        }
+        logic_dsk();
+        logic_blg();
+        logic_gas();
+        calc_diff_tot();
+        set_density_scale(density_scale_mode);
+        set_hud_mode(hud_mode);
+
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.1;
+        run_post();
+    </script>
+
+</body>
+
+</html>
