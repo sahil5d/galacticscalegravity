@@ -13,6 +13,11 @@
 - `dashboard1.html`
   - Check quality of 3D mass model by comparing sim a_classic to SPARC-authors-claimed a_classic (from their reported v contribution, eq 1 https://arxiv.org/pdf/1803.00022)
 
+![mass voxels 1](i_NGC0055_1.jpg)
+![mass voxels 2](i_NGC0055_2.jpg)
+![mass voxels 3](i_NGC0055_3.jpg)
+
+
 ---
 ### How were mass voxels calculated?
 See code for details. Informally
@@ -36,8 +41,5 @@ https://astroweb.case.edu/SPARC (Table2.mrt)
 ### Gravity Formulas
 1) Classic: a = GM/r^2
 2) MOND (Milgrom): a ≈ sqrt(GM/r^2 * c^2/87Gly)
-3) Conformal (Mannheim): a = GM/r^2 + k1 M + k2 - k3 r
-  - k1 ≈ 1.23 * 10^-52 m/(s^2 kg)
-  - k2 ≈ 1.38 * 10^-11 m/s^2
-  - k3 ≈ 8.57 * 10^-33 1/s^2
+3) Conformal (Mannheim): a = GM/r^2 + k1 M + k2 - k3 r, with k1 ≈ 1.2e-52 m/(s^2 kg), k2 ≈ 1.4e-11 m/s^2, k3 ≈ 8.6e-33 1/s^2
 4) 
