@@ -46,3 +46,11 @@ https://astroweb.case.edu/SPARC (Table2.mrt)
 3) Conformal (Mannheim): a = GM/r^2 + k1 M + k2 + k3 r_galaxycenter, with k1 ≈ 1.2e-52 m/(s^2 kg), k2 ≈ 1.4e-11 m/s^2, k3 ≈ -8.6e-33 1/s^2
 4) Polynomial: a = GM/r^2 + k1 GM/r + k2 GM + k3 GMr + k4 GMr^2, with k1 ≈ 5.4e-21 1/m, k2 ≈ -5.8e-42 1/m^2, k3 ≈ 3.1e-63 1/m^3, k4 ≈ -5.0e-85 1/m^4
 5) Accel-dep term: a = GM/r^2 (1 + (c^2/87Gly) / a), and solve w quadratic formula
+
+---
+### Issues
+1) Doesn't fit observed accelerations
+2) Doesn't produce a_total in galactic mass scene when near planet. "low-accel requirement" is a hack.
+3) k2 direction is hardcoded. r_galaxycenter (note, it's not r) is a hardcode.
+4) GMr and GMr^2 terms mean huge accel and tidal accel from a galaxy 2Mly away.
+5) Doesn't produce accel boost to galaxycenter when near planet

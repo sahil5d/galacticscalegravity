@@ -532,7 +532,7 @@ function printDashboardSummary(dataset, formulaKeys, opts) {
 function renderDashboardNav(activePage) {
     const items = [
         { id: 'viewer', href: './index.html', label: 'Mass Voxels' },
-        { id: 'd1', href: './dashboard1.html', label: 'D1: Classical' },
+        { id: 'd1', href: './dashboard1.html', label: 'D1: Classic' },
         { id: 'd2', href: './dashboard2.html', label: 'D2: Formulas 1–5' },
         { id: 'd3', href: './dashboard3.html', label: 'D3: a-Term' }
     ];
