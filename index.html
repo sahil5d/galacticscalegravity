@@ -22,146 +22,33 @@
             outline: none;
             border: none;
         }
-
-        #theinfo {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 8px 12px;
-            border-radius: 4px;
-            pointer-events: none;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-
-        #hud-mode-bar {
-            position: fixed;
-            bottom: 510px;
-            left: 16px;
-            width: 340px;
-            display: flex;
-            gap: 4px;
-            background: rgba(10, 10, 18, 0.88);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            padding: 4px;
-            box-sizing: border-box;
-            z-index: 10;
-        }
-
-        .hud-mode-btn {
-            flex: 1;
-            background: transparent;
-            color: #94a3b8;
-            border: 1px solid transparent;
-            border-radius: 4px;
-            padding: 4px 2px;
-            font-family: monospace;
-            font-size: 10px;
-            font-weight: 600;
-            cursor: pointer;
-            text-align: center;
-        }
-
-        .hud-mode-btn:hover {
-            color: #f8fafc;
-            background: rgba(255, 255, 255, 0.06);
-        }
-
-        .hud-mode-btn.active[data-mode="all"] {
-            background: rgba(255, 255, 255, 0.16);
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.55);
-        }
-
-        .hud-mode-btn.active[data-mode="dsk"] {
-            background: rgba(239, 68, 68, 0.20);
-            color: #f87171;
-            border-color: rgba(239, 68, 68, 0.55);
-        }
-
-        .hud-mode-btn.active[data-mode="blg"] {
-            background: rgba(34, 197, 94, 0.20);
-            color: #4ade80;
-            border-color: rgba(34, 197, 94, 0.55);
-        }
-
-        .hud-mode-btn.active[data-mode="gas"] {
-            background: rgba(59, 130, 246, 0.20);
-            color: #60a5fa;
-            border-color: rgba(59, 130, 246, 0.55);
-        }
-
-        #density-scale-bar {
-            position: fixed;
-            bottom: 476px;
-            left: 16px;
-            width: 340px;
-            display: flex;
-            gap: 4px;
-            background: rgba(10, 10, 18, 0.88);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            padding: 4px;
-            box-sizing: border-box;
-            z-index: 10;
-        }
-
-        .density-scale-btn {
-            flex: 1;
-            background: transparent;
-            color: #94a3b8;
-            border: 1px solid transparent;
-            border-radius: 4px;
-            padding: 4px 4px;
-            font-family: monospace;
-            font-size: 10px;
-            font-weight: 600;
-            cursor: pointer;
-            text-align: center;
-        }
-
-        .density-scale-btn:hover {
-            color: #f8fafc;
-            background: rgba(255, 255, 255, 0.06);
-        }
-
-        .density-scale-btn.active {
-            background: rgba(255, 255, 255, 0.14);
-            color: #f8fafc;
-            border-color: rgba(255, 255, 255, 0.35);
-        }
-
-        #accel-hud {
-            position: fixed;
-            bottom: 248px;
-            left: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            pointer-events: none;
-        }
-
-        #sb-hud {
-            position: fixed;
-            bottom: 16px;
-            left: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            pointer-events: none;
-            /* canvas background set in JS */
-        }
     </style>
+    <link rel="stylesheet" href="./hud.css">
+
+    <!-- microsoft website analytics -->
+    <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "z4v1j9q1cb");
+</script>
+
 </head>
 
 <body>
     <div id="thescene"></div>
 
     <div id="theinfo">
-        <b>Galaxy Mass Voxels Estimate</b> <span id="gal-label" style="color:#94a3b8;"></span><br>
-        <span id="rho-scale-info" style="font-size:11px; color:#94a3b8;"></span>
-        <!-- • Drag to rotate | Scroll to zoom<br> -->
+        <b>Galaxy Mass Voxels Estimate</b>
     </div>
+
+    <nav class="header-nav" id="top-nav">
+        <a class="nav-pill active" id="nav-viewer" href="./index.html">Mass Voxels</a>
+        <a class="nav-pill" id="nav-dash1" href="./dashboard1.html">D1: Classical</a>
+        <a class="nav-pill" id="nav-dash2" href="./dashboard2.html">D2: Formulas 1–5</a>
+        <a class="nav-pill" id="nav-dash3" href="./dashboard3.html">D3: a-Term</a>
+    </nav>
 
     <div id="hud-mode-bar">
         <button class="hud-mode-btn active" data-mode="all" onclick="set_hud_mode('all')">All (Dsk+Blg+Gas)</button>
@@ -177,12 +64,19 @@
     </div>
     <canvas id="accel-hud" width="340" height="220"></canvas>
     <canvas id="sb-hud" width="340" height="220"></canvas>
+    <div id="hud-controls">
+        <div class="hud-controls-row">
+            <button id="gal-prev-btn" type="button" title="Previous galaxy [">&lsaquo;</button>
+            <select id="gal-select" title="Select SPARC galaxy"></select>
+            <button id="gal-next-btn" type="button" title="Next galaxy ]">&rsaquo;</button>
+            <button id="gal-random-btn" type="button" title="Load a random galaxy">Random</button>
+            <button id="gal-rotate-btn" class="active" type="button" title="Toggle camera auto-rotation">Rotate: ON</button>
+        </div>
+        <span class="hud-controls-hint">Drag: rotate &middot; Scroll: zoom &middot; [ ]: prev/next</span>
+    </div>
 
     <script src="./js_three.min.js"></script>
     <script src="./js_threeorbitcontrols.js"></script>
-
-    <!-- <script src="./js_d3.min.js"></script> -->
-    <!-- <script src="./js_plot.min.js"></script> -->
 
     <script src="./lib.js"></script>
 
@@ -194,6 +88,7 @@
     <script src="./logic_dsk.js"></script>
     <script src="./logic_blg.js"></script>
     <script src="./logic_gas.js"></script>
+    <!-- <script src="./logic_grav.js"></script> -->
 
     <!-- SCENE SETUP -->
     <script>
@@ -256,15 +151,94 @@
             renderer.render(scene, camera);
         }
 
-        if (document.getElementById('gal-label')) {
-            document.getElementById('gal-label').textContent = '\u2014 ' + thegal;
+        function update_nav_links(name) {
+            var q = '?gal=' + encodeURIComponent(name);
+            var v = document.getElementById('nav-viewer');
+            var d1 = document.getElementById('nav-dash1');
+            var d2 = document.getElementById('nav-dash2');
+            var d3 = document.getElementById('nav-dash3');
+            if (v) v.href = './index.html' + q;
+            if (d1) d1.href = './dashboard1.html' + q;
+            if (d2) d2.href = './dashboard2.html' + q;
+            if (d3) d3.href = './dashboard3.html' + q;
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', q);
+            }
         }
-        logic_dsk();
-        logic_blg();
-        logic_gas();
-        calc_diff_tot();
-        set_density_scale(density_scale_mode);
-        set_hud_mode(hud_mode);
+
+        function switch_galaxy(name) {
+            if (!name || !galaxiesobj[name]) return;
+            while (scene.children.length > 0) {
+                var obj = scene.children[0];
+                scene.remove(obj);
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) obj.material.dispose();
+            }
+            thegal = name;
+            var g = galaxiesobj[thegal];
+            g.octant_col_sums = null;
+            g.rho_common_peak = 0;
+            g.mesh_dsk = null;
+            g.mesh_blg = null;
+            g.mesh_gas = null;
+
+            if (galSelect) galSelect.value = thegal;
+            update_nav_links(thegal);
+
+            logic_dsk();
+            logic_blg();
+            logic_gas();
+            calc_diff_tot();
+            set_density_scale(density_scale_mode);
+            set_hud_mode(hud_mode);
+        }
+
+        function step_galaxy(delta) {
+            var idx = galaxieslist.indexOf(thegal);
+            switch_galaxy(galaxieslist[(idx + delta + galaxieslist.length) % galaxieslist.length]);
+        }
+
+        var galSelect = document.getElementById('gal-select');
+        if (galSelect && typeof galaxieslist !== 'undefined') {
+            for (var gi = 0; gi < galaxieslist.length; gi++) {
+                var opt = document.createElement('option');
+                opt.value = galaxieslist[gi];
+                opt.textContent = galaxieslist[gi];
+                galSelect.appendChild(opt);
+            }
+            galSelect.addEventListener('change', function () {
+                switch_galaxy(this.value);
+            });
+        }
+        var galPrevBtn = document.getElementById('gal-prev-btn');
+        if (galPrevBtn && typeof galaxieslist !== 'undefined') {
+            galPrevBtn.addEventListener('click', function () { step_galaxy(-1); });
+        }
+        var galNextBtn = document.getElementById('gal-next-btn');
+        if (galNextBtn && typeof galaxieslist !== 'undefined') {
+            galNextBtn.addEventListener('click', function () { step_galaxy(1); });
+        }
+        var galRandomBtn = document.getElementById('gal-random-btn');
+        if (galRandomBtn && typeof galaxieslist !== 'undefined') {
+            galRandomBtn.addEventListener('click', function () {
+                switch_galaxy(galaxieslist[Math.floor(Math.random() * galaxieslist.length)]);
+            });
+        }
+        var galRotateBtn = document.getElementById('gal-rotate-btn');
+        if (galRotateBtn) {
+            galRotateBtn.addEventListener('click', function () {
+                controls.autoRotate = !controls.autoRotate;
+                this.textContent = controls.autoRotate ? 'Rotate: ON' : 'Rotate: OFF';
+                this.classList.toggle('active', controls.autoRotate);
+            });
+        }
+        window.addEventListener('keydown', function (e) {
+            if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
+            if (e.key === '[') step_galaxy(-1);
+            else if (e.key === ']') step_galaxy(1);
+        });
+
+        switch_galaxy(thegal);
 
         controls.autoRotate = true;
         controls.autoRotateSpeed = 0.1;

@@ -30,9 +30,9 @@ function get_amr_gas(r_grid) {
 // genuinely thin near the galactic center (z_gas << r) and flaring outward as (r / rmax)^1.5.
 function get_z_gas(r, galaxyobj) {
     var rmax = galaxyobj.rmax;
-    var voxellen = rmax / gridR;
-    var uR = Math.max(0, r) / rmax;
-    return 0.03 * Math.max(0, r) + 2.2 * voxellen * uR * Math.sqrt(uR);
+    var voxellen = rmax / rgrid100;
+    var uR = r / rmax;
+    return 0.03 * r + 2.2 * voxellen * uR * Math.sqrt(uR);
 }
 
 // Gaussian elimination with partial pivoting on active index subset for NNLS.
@@ -47,25 +47,7 @@ function solve_active_linear_system(H_in, b_in, activeIdx) {
         row[m] = b_in[i];
         M[r] = row;
     }
-    for (var col = 0; col < m; col++) {
-        var piv = col;
-        for (var r = col + 1; r < m; r++) {
-            if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
-        }
-        var tmp = M[col]; M[col] = M[piv]; M[piv] = tmp;
-        var diag = M[col][col];
-        if (Math.abs(diag) < 1e-35) continue;
-        for (var c = col; c <= m; c++) M[col][c] /= diag;
-        for (var r = 0; r < m; r++) {
-            if (r === col) continue;
-            var f = M[r][col];
-            if (f === 0) continue;
-            for (var c = col; c <= m; c++) M[r][c] -= f * M[col][c];
-        }
-    }
-    var out = new Float64Array(m);
-    for (var r = 0; r < m; r++) out[r] = M[r][m];
-    return out;
+    return solve_gaussian_linear_system(M);
 }
 
 // Lawson-Hanson active-set Non-Negative Least Squares (NNLS) solver for H * sigma = b (sigma >= 0)
@@ -136,16 +118,13 @@ function solve_nnls_gas(H, b, M) {
 // 2. 3D VOXEL GAS SURFACE DENSITY RECONSTRUCTION & INTERPOLATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Reconstruct non-negative radial gas surface mass density profile sigma_gas(R) (in kg/m^2)
-// and 2-octant 3D AMR simulation voxels directly from SPARC's claimed a_classic_gas.
-function build_sim_voxels_gas(galaxyobj) {
+// Construct radial basis nodes r_nodes for gas surface density interpolation.
+function build_gas_r_nodes(galaxyobj) {
     var rd = galaxyobj.radiusdata;
     var n = rd.length;
     var rmax = galaxyobj.rmax;
-    var voxellen = rmax / gridR;
-    var max_gridR = 115;
+    var voxellen = rmax / rgrid100;
 
-    // Construct radial basis nodes r_nodes with AMR-aware minimum spacing
     var r_nodes = [0];
     if (rd[0]['r'] > 1.5 * voxellen) {
         r_nodes.push(0.4 * rd[0]['r']);
@@ -166,49 +145,112 @@ function build_sim_voxels_gas(galaxyobj) {
     }
     r_nodes.push(1.07 * rmax);
     r_nodes.push(1.15 * rmax);
+    return r_nodes;
+}
+
+// Populate gas_r_nodes, gas_sigma_nodes, sigma_gas, and sb_gas on galaxyobj from precomputed
+// GAS_SIGMA_NODES (or solve via 3D voxel NNLS if not present in GAS_SIGMA_NODES).
+function init_gas_profile(galaxyobj, sigma_solved) {
+    var rd = galaxyobj.radiusdata;
+    var n = rd.length;
+    var rmax = galaxyobj.rmax;
+    var r_nodes = galaxyobj.gas_r_nodes || build_gas_r_nodes(galaxyobj);
+    var M = r_nodes.length - 1;
+    var src = sigma_solved || (typeof GAS_SIGMA_NODES !== 'undefined' ? GAS_SIGMA_NODES[galaxyobj.name] : null);
+    if (!src || src.length !== M) return false;
+
+    var sigma_nodes = new Float64Array(M + 1);
+    for (var i = 0; i < M; i++) sigma_nodes[i] = src[i];
+    sigma_nodes[M] = 0;
+    galaxyobj.gas_r_nodes = r_nodes;
+    galaxyobj.gas_sigma_nodes = sigma_nodes;
+    galaxyobj.z_gas_outer = get_z_gas(rmax, galaxyobj);
+
+    var conv_dsk = (Msun / Lsun) * coeff_dsk;
+    var sb_gas_max = 0, sigma_gas_max = 0;
+    for (var k = 0; k < n; k++) {
+        var sig_k = interpolate_sigma_gas(rd[k]['r'], galaxyobj);
+        var sb_k = sig_k / conv_dsk;
+        rd[k]['sigma_gas'] = sig_k;
+        rd[k]['sb_gas'] = sb_k;
+        if (sig_k > sigma_gas_max) sigma_gas_max = sig_k;
+        if (sb_k > sb_gas_max) sb_gas_max = sb_k;
+    }
+    var sigma_gas_peak = sigma_gas_max;
+    for (var i = 0; i <= M; i++) {
+        if (sigma_nodes[i] > sigma_gas_peak) sigma_gas_peak = sigma_nodes[i];
+    }
+    galaxyobj.sigma_gas_max = sigma_gas_max;
+    galaxyobj.sigma_gas_peak = sigma_gas_peak;
+    galaxyobj.sb_gas_max = sb_gas_max;
+    galaxyobj.sb_gas_peak = sigma_gas_peak / conv_dsk;
+    return true;
+}
+
+// Reconstruct non-negative radial gas surface mass density profile sigma_gas(R) (in kg/m^2)
+// and 1-octant 3D AMR simulation voxels from GAS_SIGMA_NODES (or fallback NNLS solver).
+function build_sim_voxels_gas(galaxyobj) {
+    var rd = galaxyobj.radiusdata;
+    var n = rd.length;
+    var rmax = galaxyobj.rmax;
+    var voxellen = rmax / rgrid100;
+    var rgridmax = 115;
+
+    var r_nodes = build_gas_r_nodes(galaxyobj);
+    galaxyobj.gas_r_nodes = r_nodes;
     var M = r_nodes.length - 1; // r_nodes[M] = 0 outer taper boundary
 
-    // Build 2-octant (y >= 0, z >= 0, all x) thin flared disk geometry voxels
-    var geom_voxels = [];
-    for (var i = -max_gridR; i <= max_gridR; i++) {
-        for (var j = 0; j <= max_gridR; j++) {
-            var r_grid = Math.hypot(i, j);
-            if (r_grid > max_gridR) continue;
-            var S = get_amr_gas(r_grid);
-            var sub_len = voxellen / S, sub_area = sub_len * sub_len;
-            var sj_start = (j === 0) ? Math.floor(S / 2) : 0;
+    // Fast path: use precomputed GAS_SIGMA_NODES[galaxyobj.name] without assembling A[k][m] or solving NNLS
+    if (init_gas_profile(galaxyobj)) {
+        var sim_buf = create_sim_voxel_buffer(16384);
+        for_each_1octant_amr_subcol(
+            rgridmax,
+            voxellen,
+            get_amr_gas,
+            function (x, y, R, area_sym) {
+                var sig_v = interpolate_sigma_gas(R, galaxyobj);
+                if (sig_v <= 0) return;
 
-            for (var si = 0; si < S; si++) {
-                var x = (i + (si + 0.5) / S - 0.5) * voxellen;
-                for (var sj = sj_start; sj < S; sj++) {
-                    var oy = (sj + 0.5) / S - 0.5;
-                    var y = Math.max(0, (j + oy) * voxellen);
-                    var sym_y = (j === 0 && Math.abs(oy) < 1e-9) ? 0.5 : 1.0;
-                    var R = Math.hypot(x, y);
-                    if (R >= r_nodes[M]) continue;
+                var col_mass = area_sym * sig_v;
+                var z_gas = get_z_gas(R, galaxyobj);
 
-                    var z_gas = get_z_gas(R, galaxyobj);
-                    var m = 0;
-                    while (m + 1 < M && r_nodes[m + 1] <= R) m++;
-                    var t = (R - r_nodes[m]) / (r_nodes[m + 1] - r_nodes[m]);
-                    var area_sym = sub_area * sym_y;
-
-                    for (var l = 0; l < GAS_U_LAYERS.length; l++) {
-                        geom_voxels.push({
-                            x: x,
-                            y: y,
-                            z: GAS_U_LAYERS[l] * z_gas,
-                            W: area_sym * GAS_W_LAYERS[l],
-                            m: m,
-                            t: t
-                        });
-                    }
+                for (var l = 0; l < GAS_U_LAYERS.length; l++) {
+                    push_sim_voxel(sim_buf, x, y, GAS_U_LAYERS[l] * z_gas, col_mass * GAS_W_LAYERS[l]);
                 }
             }
-        }
+        );
+        galaxyobj.voxellen_gas = voxellen;
+        return (galaxyobj.voxels_gas_sim = finalize_sim_voxel_buffer(sim_buf));
     }
 
-    // Assemble exact 3D voxel Newtonian kernel matrix A[k][m]
+    // Fallback path: build 1-octant geometry voxels and solve weighted NNLS from a_classic_gas
+    var geom_voxels = [];
+    for_each_1octant_amr_subcol(
+        rgridmax,
+        voxellen,
+        get_amr_gas,
+        function (x, y, R, area_sym) {
+            if (R >= r_nodes[M]) return;
+
+            var z_gas = get_z_gas(R, galaxyobj);
+            var m = 0;
+            while (m + 1 < M && r_nodes[m + 1] <= R) m++;
+            var t = (R - r_nodes[m]) / (r_nodes[m + 1] - r_nodes[m]);
+
+            for (var l = 0; l < GAS_U_LAYERS.length; l++) {
+                geom_voxels.push({
+                    x: x,
+                    y: y,
+                    z: GAS_U_LAYERS[l] * z_gas,
+                    W: area_sym * GAS_W_LAYERS[l],
+                    m: m,
+                    t: t
+                });
+            }
+        }
+    );
+
+    // Assemble exact 3D voxel classical kernel matrix A[k][m]
     var A = new Array(n);
     for (var k = 0; k < n; k++) {
         var row = new Float64Array(M);
@@ -230,16 +272,21 @@ function build_sim_voxels_gas(galaxyobj) {
             var xe = x_evals[ei].x, we = x_evals[ei].w;
             for (var vi = 0; vi < geom_voxels.length; vi++) {
                 var vox = geom_voxels[vi];
-                if (Math.abs(vox.x - xe) < cut && vox.y < cut && vox.z < cut) continue;
-                var dx = vox.x - xe, dy = vox.y, dz = vox.z;
-                var dist2 = dx * dx + dy * dy + dz * dz;
-                var dist = Math.sqrt(dist2);
-                var mag = 4 * G * vox.W / dist2;
-                var dir_x = dx / dist;
-                var g_val = -mag * dir_x * we;
+                var vx = vox.x, dy = vox.y, dz = vox.z;
+                var in_yz_cut = (dy < cut && dz < cut);
+                var dy2_dz2 = dy * dy + dz * dz;
                 var m = vox.m, t = vox.t;
-                row[m] += (1 - t) * g_val;
-                if (m + 1 < M) row[m + 1] += t * g_val;
+                var gw = 4 * G * vox.W * we;
+
+                var nx = vx > 0 ? 2 : 1;
+                for (var s = 0; s < nx; s++) {
+                    var dx = (s === 0 ? vx : -vx) - xe;
+                    if (in_yz_cut && Math.abs(dx) < cut) continue;
+                    var dist2 = dx * dx + dy2_dz2;
+                    var g_val = -(gw / dist2) * (dx / Math.sqrt(dist2));
+                    row[m] += (1 - t) * g_val;
+                    if (m + 1 < M) row[m + 1] += t * g_val;
+                }
             }
         }
     }
@@ -293,46 +340,21 @@ function build_sim_voxels_gas(galaxyobj) {
         sigma = solve_nnls_gas(H, b, M);
     }
 
-    // Store piecewise-linear node table [r_nodes, sigma_nodes] with sigma_nodes[M] = 0
-    var sigma_nodes = new Float64Array(M + 1);
-    for (var i = 0; i < M; i++) sigma_nodes[i] = sigma[i];
-    sigma_nodes[M] = 0;
-    galaxyobj.gas_r_nodes = r_nodes;
-    galaxyobj.gas_sigma_nodes = sigma_nodes;
-    galaxyobj.z_gas_outer = get_z_gas(rmax, galaxyobj);
+    init_gas_profile(galaxyobj, sigma);
+    var sigma_nodes = galaxyobj.gas_sigma_nodes;
 
-    // Populate sigma_gas (kg/m^2) and equivalent sb_gas (W/m^2) on radiusdata
-    var conv_dsk = (Msun / Lsun) * coeff_dsk;
-    var sb_gas_max = 0, sigma_gas_max = 0;
-    for (var k = 0; k < n; k++) {
-        var sig_k = interpolate_sigma_gas(rd[k]['r'], galaxyobj);
-        var sb_k = sig_k / conv_dsk;
-        rd[k]['sigma_gas'] = sig_k;
-        rd[k]['sb_gas'] = sb_k;
-        if (sig_k > sigma_gas_max) sigma_gas_max = sig_k;
-        if (sb_k > sb_gas_max) sb_gas_max = sb_k;
-    }
-    var sigma_gas_peak = sigma_gas_max;
-    for (var i = 0; i <= M; i++) {
-        if (sigma_nodes[i] > sigma_gas_peak) sigma_gas_peak = sigma_nodes[i];
-    }
-    galaxyobj.sigma_gas_max = sigma_gas_max;
-    galaxyobj.sigma_gas_peak = sigma_gas_peak;
-    galaxyobj.sb_gas_max = sb_gas_max;
-    galaxyobj.sb_gas_peak = sigma_gas_peak / conv_dsk;
-
-    // Instantiate 2-octant 3D simulation voxels with exact masses m_v = W_v * sigma_gas(R_v)
-    var sim_voxels = [];
+    // Instantiate 1-octant 3D simulation voxels with exact masses m_v = W_v * sigma_gas(R_v)
+    var sim_buf = create_sim_voxel_buffer(geom_voxels.length);
     for (var vi = 0; vi < geom_voxels.length; vi++) {
         var gv = geom_voxels[vi];
         var sig_v = (1 - gv.t) * sigma_nodes[gv.m] + gv.t * sigma_nodes[gv.m + 1];
         var mass = gv.W * sig_v;
         if (mass <= 0) continue;
-        sim_voxels.push({ 'p': new p(gv.x, gv.y, gv.z), 'mass': mass });
+        push_sim_voxel(sim_buf, gv.x, gv.y, gv.z, mass);
     }
 
     galaxyobj.voxellen_gas = voxellen;
-    return (galaxyobj.voxels_gas_sim = sim_voxels);
+    return (galaxyobj.voxels_gas_sim = finalize_sim_voxel_buffer(sim_buf));
 }
 
 // Interpolate reconstructed 2D gas surface mass density sigma_gas(r) (in kg/m^2) at radius r (in meters).
@@ -348,7 +370,7 @@ function interpolate_sigma_gas(r, galaxyobj) {
     while (m + 1 < M && r_nodes[m + 1] <= r) m++;
     var h = r_nodes[m + 1] - r_nodes[m];
     var t = h > 0 ? (r - r_nodes[m]) / h : 0;
-    return Math.max(0, (1 - t) * sigma_nodes[m] + t * sigma_nodes[m + 1]);
+    return (1 - t) * sigma_nodes[m] + t * sigma_nodes[m + 1];
 }
 
 // Interpolate gas surface mass density expressed in equivalent surface brightness units (W/m^2)
@@ -363,71 +385,71 @@ function interpolate_sb_gas(r, galaxyobj) {
 // 3. 3D VISUALIZATION VOXELS, GRAVITY EVALUATION & SIMULATION RUNNER
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Build 1x1x1 3D visualization voxels across the thin flared gas disk colored by linear 3D mass density rho_gas (in kg/m^3),
-// normalized so the peak z-column sum equals #ffffff.
-function build_viz_voxels_gas(galaxyobj, gridR, voxellen) {
-    var columns = [];
+// Build 1x1x1 3D visualization voxels across the thin flared gas disk over the 1/16th diagonal wedge (0 <= j <= i, k >= 0),
+// expanding all 16 symmetries into density-sorted Int16Array/Float32Array buffers.
+function build_viz_voxels_gas(galaxyobj, rgrid100, voxellen) {
+    var maxWedgeCols = ((rgrid100 + 1) * (rgrid100 + 2)) >> 1;
+    var wedgeI = new Int16Array(maxWedgeCols);
+    var wedgeJ = new Int16Array(maxWedgeCols);
+    var wedgeR = new Float64Array(maxWedgeCols);
+    var wedgeColRho = new Float64Array(maxWedgeCols);
+    var nCols = 0;
     var rho_gas_peak = 0;
 
-    for (var i = -gridR; i <= gridR; i++) {
-        for (var j = -gridR; j <= gridR; j++) {
+    for (var i = 0; i <= rgrid100; i++) {
+        for (var j = 0; j <= i; j++) {
             var r_grid = Math.hypot(i, j);
-            if (r_grid > gridR) continue;
+            if (r_grid > rgrid100) continue;
             var R = r_grid * voxellen;
             var sigma_gas = interpolate_sigma_gas(R, galaxyobj);
             if (sigma_gas <= 0) continue;
-
-            var z_gas = Math.max(0.35 * voxellen, get_z_gas(R, galaxyobj));
-            var k_local = Math.min(6, Math.max(1, Math.ceil(2.2 * z_gas / voxellen)));
-            var z_order = [0];
-            for (var kz = 1; kz <= k_local; kz++) {
-                z_order.push(kz, -kz);
-            }
-
-            var w_arr = new Float64Array(z_order.length);
-            var w_sum = 0;
-            for (var idx = 0; idx < z_order.length; idx++) {
-                var z = z_order[idx] * voxellen;
-                var w = 1 / (Math.cosh(z / z_gas) ** 2);
-                w_arr[idx] = w;
-                w_sum += w;
-            }
-
             var col_rho = sigma_gas / voxellen;
             if (col_rho > rho_gas_peak) rho_gas_peak = col_rho;
+            add_octant_col_rho(galaxyobj, i, j, col_rho);
+            wedgeI[nCols] = i;
+            wedgeJ[nCols] = j;
+            wedgeR[nCols] = R;
+            wedgeColRho[nCols] = col_rho;
+            nCols++;
+        }
+    }
 
-            var col_voxels = [];
-            for (var idx = 0; idx < z_order.length; idx++) {
-                var w_norm = w_arr[idx] / w_sum;
-                var rho_gas = col_rho * w_norm; // 3D mass density (kg/m^3)
-                col_voxels.push({ x: i, y: j, z: z_order[idx], rho: rho_gas });
-            }
-            columns.push(col_voxels);
+    var buf = create_viz_voxel_buffer(16384);
+    var w_arr = new Float64Array(7);
+    for (var c = 0; c < nCols; c++) {
+        var i = wedgeI[c];
+        var j = wedgeJ[c];
+        var R = wedgeR[c];
+        var col_rho = wedgeColRho[c];
+
+        var z_gas = Math.max(0.35 * voxellen, get_z_gas(R, galaxyobj));
+        var k_local = Math.min(6, Math.max(1, Math.ceil(2.2 * z_gas / voxellen)));
+
+        var w_sum = 1;
+        w_arr[0] = 1;
+        for (var k = 1; k <= k_local; k++) {
+            var z = k * voxellen;
+            var w = 1 / (Math.cosh(z / z_gas) ** 2);
+            w_arr[k] = w;
+            w_sum += 2 * w;
+        }
+
+        var inv_w_sum = col_rho / w_sum;
+        for (var k = 0; k <= k_local; k++) {
+            push_wedge_viz_voxel(buf, i, j, k, w_arr[k] * inv_w_sum, rho_gas_peak);
         }
     }
 
     galaxyobj.rho_gas_peak = rho_gas_peak;
-    var viz_voxels = [];
-    for (var c = 0; c < columns.length; c++) {
-        var col = columns[c];
-        // var dither = (((col[0].x * 73856093) ^ (col[0].y * 19349663)) & 0xffff) / 65536 - 0.5;
-        for (var idx = 0; idx < col.length; idx++) {
-            var rv = col[idx];
-            var val = rho_gas_peak > 0 ? Math.min(1, rv.rho / rho_gas_peak) : 0;
-            var q = Math.min(255, Math.max(0, Math.round(val * 255)));
-            if (q <= 0) continue;
-            viz_voxels.push({ x: rv.x, y: rv.y, z: rv.z, size: 1, rho: rv.rho, color: floattohexgray(q / 255) });
-        }
-    }
-    return (galaxyobj.voxels_gas_viz = viz_voxels);
+    return (galaxyobj.voxels_gas_viz = finalize_viz_voxel_buffer(buf, rho_gas_peak));
 }
 
-// Evaluate radial gas gravitational acceleration at radius Rk (in meters) by linearly interpolating
+// Evaluate 3D vector-projected gas gravity moments at radius Rk (in meters) by linearly interpolating
 // between the two bracketing AMR sub-voxel centers x0 and x1.
-function eval_radial_accel_gas(voxels_sim, Rk, voxellen) {
+function eval_grav_moments_gas(voxels_sim, Rk, voxellen) {
     var r_grid = Rk / voxellen;
     var S_test = get_amr_gas(r_grid);
-    return eval_bracketed_radial_accel(voxels_sim, Rk, voxellen / S_test);
+    return eval_bracketed_grav_moments_h(voxels_sim, Rk, voxellen / S_test);
 }
 
 // Compare 3D voxel gas acceleration (a_classic_gas_sim) against SPARC claimed gas acceleration (a_classic_gas).
@@ -435,10 +457,11 @@ function calc_diff_gas(galaxyobj, voxellen) {
     var radiusdata = galaxyobj.radiusdata;
     var voxels_sim = galaxyobj.voxels_gas_sim;
     if (!voxels_sim) return;
-    if (voxellen === undefined) voxellen = galaxyobj.voxellen_gas || (galaxyobj.rmax / gridR);
+    if (voxellen === undefined) voxellen = galaxyobj.voxellen_gas || (galaxyobj.rmax / rgrid100);
 
     for (var k = 0; k < radiusdata.length; k++) {
-        radiusdata[k]['a_classic_gas_sim'] = eval_radial_accel_gas(voxels_sim, radiusdata[k]['r'], voxellen);
+        var mom = eval_grav_moments_gas(voxels_sim, radiusdata[k]['r'], voxellen);
+        store_component_grav_moments(radiusdata[k], 'gas', mom);
     }
 
     log_accel_diff_table(galaxyobj, 'a_classic_gas', 'a_classic_gas_sim');
@@ -450,11 +473,11 @@ function logic_gas() {
     if (!galaxyobj) return;
 
     var rmax = galaxyobj.rmax;
-    var voxellen = rmax / gridR;
+    var voxellen = rmax / rgrid100;
 
     build_sim_voxels_gas(galaxyobj);
     if (typeof scene !== 'undefined') {
-        build_viz_voxels_gas(galaxyobj, gridR, voxellen);
+        build_viz_voxels_gas(galaxyobj, rgrid100, voxellen);
         galaxyobj.mesh_gas = plotcubes_instanced(galaxyobj.voxels_gas_viz, 1.0);
         console.log(
             'voxel gas:', '\n',
@@ -462,9 +485,53 @@ function logic_gas() {
             'sigma_gas_peak (kg/m^2) =', galaxyobj.sigma_gas_peak.toExponential(2), '\n',
             'rho_gas_peak (kg/m^3) =', galaxyobj.rho_gas_peak.toExponential(2), '\n',
             'gas viz voxels (1x1x1):', galaxyobj.voxels_gas_viz.length, '\n',
-            'gas sim voxels (2 octants):', galaxyobj.voxels_gas_sim.length
+            'gas sim voxels (1 octant):', galaxyobj.voxels_gas_sim.length
         );
     }
 
     calc_diff_gas(galaxyobj, voxellen);
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. PRECOMPUTED GAS SURFACE MASS DENSITY NODES (175 SPARC GALAXIES)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Precomputed non-negative radial gas surface mass density nodes sigma_gas (in kg/m^2) for all 175 SPARC galaxies.
+var GAS_SIGMA_NODES = {
+    "CamB":[0.0097101,0.00939382,0.00929307,0.00927262,0.00810375,0.00729486,0.00613737,0.00480873,0.00343901,0.00191707,0.000438824,0,0.0000359524], "D512-2":[0.0042898,0.0035318,0.00322171,0.0028436,0.00200149,0.00112699,0.000736085,0.000739298], "D564-8":[0.00616439,0.00512361,0.00469498,0.00419154,0.00299268,0.00191085,0.00129868,0.000757319,0.000504046,0.000507744], "D631-7":[0.0468438,0.0407799,0.0382669,0.0355175,0.027413,0.0202116,0.0152361,0.0111946,0.00863191,0.00601658,0.00460381,0.00327162,0.0024056,0.00170503,0.00125828,0.000895147,0.000647261,0.000455065,0.00032047,0.000328342], "DDO064":[0.0106017,0.0116363,0.0120939,0.012615,0.0134589,0.0171121,0.0151192,0.0174971,0.0198226,0.0229228,0.0230966,0.0188163,0.0190338,0.0122532,0.0137652,0.0103508,0.00872633,0.00872691],
+    "DDO154":[0.0140695,0.0138384,0.0137663,0.0137589,0.013291,0.0117248,0.00950849,0.00758532,0.00656571,0.00488744,0.00290133,0.00204073,0.00124195,0.000883425,0.000529374,0.000536742], "DDO161":[0.0312987,0.0325112,0.0333127,0.0353641,0.0318792,0.0335395,0.0307707,0.0313883,0.0282568,0.0260303,0.0219178,0.0191828,0.0165353,0.0149368,0.0129212,0.012163,0.010612,0.0104973,0.00854891,0.00896687,0.00737524,0.00784764,0.00601481,0.00606621,0.00427981,0.00416192,0.00266021,0.00208324,0.00138699,0.0010299,0.000734789,0.000496447,0.000540635,0,0.000423316], "DDO168":[0.0689273,0.0629083,0.0609798,0.0607494,0.0410454,0.0205578,0.0192239,0.0151825,0.00956694,0.00849357,0.0043754,0.00528308,0.00155777,0.00158287], "DDO170":[0.0148238,0.0134521,0.0128242,0.0118323,0.0125698,0.00942778,0.00716573,0.00491501,0.00234165,0.00145822,0,0.0000625884], "ESO079-G014":[0.00913555,0.00993775,0.0103461,0.0110436,0.010397,0.00943646,0.00879633,0.00808058,0.00788764,0.00808645,0.00862293,0.00915679,0.00976163,0.0101476,0.00945971,0.00793007,0.00567978,0.0039659,0.0039765],
+    "ESO116-G012":[0.0109685,0.0118799,0.0123097,0.0128476,0.0132333,0.0147148,0.0165709,0.0179139,0.0174011,0.0165437,0.0145689,0.0115114,0.00985918,0.00870879,0.00861424,0.00734816,0.00398662,0.000559434,0.000575998], "ESO444-G084":[0.0372489,0.0345427,0.0334176,0.03222,0.0285768,0.0182717,0.0130322,0.00593689,0,0.00118683,0.00126807], "ESO563-G021":[0.014353,0,0.0123796,0.00236929,0.0114103,0.00293789,0.011085,0.00373191,0.0106029,0.00437539,0.0108321,0.00402542,0.0110169,0.00541424,0.0120476,0.00795221,0.0138863,0.00975336,0.00971302,0.0117384,0.00890558,0.00891514,0.00463279,0.0116176,0.00797425,0.0111317,0.00347642,0.0092314,0.000624478,0.00754916,0,0.00694246], "F561-1":[0.00924584,0.00920346,0.00919002,0.00918432,0.00923118,0.00860321,0.00796387,0.00653215,0.00417405,0.00418578], "F563-1":[0.00856563,0.00889258,0.00902474,0.00914427,0.00942014,0.00959128,0.00964027,0.00960479,0.00882191,0.00905794,0.00815751,0.00825415,0.00591673,0.00329088,0.00457172,0.00281098,0.00325628,0.00207095,0.00208288],
+    "F563-V1":[0.00727383,0.00718175,0.00715826,0.00717704,0.00702372,0.00570591,0.00430588,0.00341049,0.00220858,0.00221669], "F563-V2":[0.013278,0.0139725,0.0143097,0.0147591,0.014519,0.0149803,0.0151874,0.0149394,0.0155753,0.0168412,0.013045,0.00564983,0.00928081,0.00931265], "F565-V2":[0.011268,0.0110264,0.010958,0.0109916,0.0100495,0.00893735,0.00778764,0.00688033,0.0056501,0.00393187,0.00394243], "F567-2":[0,0,0,0.00632712,0,0.0124601,0.00450459,0.01119,0.0147198], "F568-1":[0.00874357,0.00886142,0.00887563,0.00879461,0.0103623,0.0124129,0.0136499,0.0138491,0.0163444,0.016761,0.018933,0.0166351,0.0150308,0.0144527,0.00718703,0.00720034],
+    "F568-3":[0.00825904,0.00820527,0.00817463,0.00811358,0.00818436,0.00817439,0.00833234,0.00850908,0.0087597,0.00906169,0.00977035,0.00974241,0.0104334,0.0103475,0.0114038,0.0105979,0.00889165,0.00769043,0.00527941,0.00463543,0.00154363,0.00155863], "F568-V1":[0.00424965,0.00627878,0.00732491,0.00885884,0.00508254,0.00937133,0.00652536,0.00999185,0.00809313,0.00962351,0.00868863,0.00983784,0.00913462,0.0102537,0.00941854,0.010344,0.00781604,0,0.00023638], "F571-8":[0.00330061,0.0032851,0.00321796,0.00261778,0.00242332,0.00206655,0.00192387,0.00169332,0.00153641,0.00155508,0.000987734,0.000935331,0.000447998,0.000241969,0.000242859], "F571-V1":[0.0121111,0.0118587,0.0118011,0.0119005,0.0107109,0.00896456,0.00718465,0.00505687,0.00240391,0.000528088,0.000544427], "F574-1":[0.00462307,0.00448826,0.00441343,0.00428348,0.00486486,0.00472694,0.00528339,0.00533612,0.00584608,0.00589618,0.00620363,0.00639362,0.00561439,0.00640656,0.0052333,0.00531738,0.0041496,0.00414736],
+    "F574-2":[0,0.000704219,0.00151186,0.00233105,0.00697244,0.00861743,0.00563546,0.00466134,0.00466604], "F579-V1":[0.00399718,0.00465684,0.00496439,0.00531199,0.00564596,0.00731459,0.00708554,0.00832851,0.00851681,0.00788145,0.00829987,0.00776587,0.00810396,0.0066119,0.00651511,0.00490757,0.004881,0.0048822], "F583-1":[0.00686569,0.00720503,0.00743629,0.00789669,0.00673704,0.00818379,0.00708945,0.00865567,0.00720896,0.00906182,0.00783874,0.00756837,0.00920453,0.00807062,0.0102856,0.00930511,0.0109881,0.00998761,0.0118275,0.0109879,0.0124189,0.0112445,0.0130936,0.0108788,0.0127629,0.00788052,0.00452602,0.00240941,0.00239883], "F583-4":[0.00321974,0.00334681,0.0034086,0.00348906,0.00339541,0.00351576,0.00329973,0.00284386,0.00272006,0.0026821,0.00257255,0.00249071,0.00224211,0.00194838,0.001951], "IC2574":[0.00548075,0.0057124,0.00582503,0.00598953,0.00603474,0.00637055,0.00719445,0.00664848,0.00670514,0.00679373,0.00621511,0.00655384,0.00595281,0.00588621,0.00561671,0.00649495,0.00755294,0.00625664,0.00755717,0.00534024,0.00805786,0.00491563,0.00901711,0.00577885,0.00650093,0.00637259,0.00558794,0.00683518,0.00473782,0.00633275,0.00307717,0.00647488,0.00303634,0.00685519,0.00367558,0.0059385,0.00443066,0.00440656],
+    "IC4202":[0.0107957,0.011593,0.0120658,0.0129948,0.0105368,0.0117239,0.0101257,0.0123148,0.0106914,0.0126376,0.0114568,0.0124691,0.0123706,0.0132796,0.013531,0.0144344,0.0144595,0.0201853,0.0165824,0.0220601,0.0166449,0.0197728,0.0170771,0.0160077,0.0155983,0.0103951,0.0155867,0.00952104,0.0153531,0.0115099,0.0158246,0.00877725,0.0139705,0.00440243,0.0114659,0.0113503], "KK98-251":[0.0146977,0.0155236,0.0159366,0.0166913,0.0160571,0.0171884,0.0163308,0.0170479,0.016059,0.0160367,0.0148967,0.0131224,0.0124304,0.0101508,0.00921066,0.00480152,0.00371099,0.000777777,0.000793748], "NGC0024":[0.0336949,0.0248756,0.0194635,0.00881893,0.0276597,0.0108246,0.0255345,0.014444,0.0241691,0.0147453,0.0228114,0.0153124,0.0222812,0.015201,0.0219505,0.0149321,0.0213382,0.0147511,0.0206965,0.0144285,0.0199941,0.014101,0.0194803,0.0136658,0.018774,0.0132559,0.0175762,0.0137386,0.00272919,0.00106677,0.000292533,0.0000422255,0], "NGC0055":[0.0423338,0.0415126,0.0415416,0.0433907,0.034102,0.0306946,0.0293855,0.0269046,0.0243506,0.0199766,0.0186408,0.0141024,0.0135273,0.00974471,0.00985853,0.00747465,0.00520018,0.00452954,0.00264626,0.00202924,0.00138046,0.00197158,0.000827623,0.00115201,0.00114657], "NGC0100":[0.00228842,0.00305019,0.00342347,0.003958,0.00332423,0.00410671,0.00470999,0.00574731,0.00663809,0.00693312,0.0066066,0.00634856,0.00579515,0.00528118,0.00471334,0.00428378,0.00381651,0.00304448,0.00358993,0.00282163,0.00350157,0.00273082,0.00326884,0.00254605,0.00254279],
+    "NGC0247":[0.00999316,0.0100673,0.010112,0.0102305,0.00977828,0.0104355,0.0100815,0.0107482,0.010318,0.0107693,0.0094771,0.00996242,0.0101556,0.0110091,0.0109916,0.0115817,0.00977183,0.0102579,0.0099308,0.00824979,0.00914774,0.00671957,0.00696842,0.00410518,0.00452047,0.00173796,0.00294646,0.000521145,0.00230119,0.00228619], "NGC0289":[0.0103111,0.0127707,0.0143326,0.0177052,0.010761,0.0150572,0.0141762,0.0135181,0.014116,0.0153435,0.0175241,0.0156694,0.014461,0.0126947,0.0141086,0.0100288,0.00994989,0.0101608,0.00809308,0.00608009,0.00552973,0.00323961,0.00345111,0.00194498,0.00250799,0.00107091,0.00135703,0.0000210513,0.00106414,0.0000500891,0.00105031,0.001026], "NGC0300":[0.00811682,0.00702012,0.00638183,0.00489524,0.00769081,0.0057237,0.00854701,0.0075779,0.00725717,0.00692501,0.0077781,0.00825474,0.00716747,0.00797445,0.00860317,0.0109336,0.00832019,0.00852315,0.00416408,0.00446077,0.00182307,0.00363962,0.00113474,0.00182537,0.00071732,0.00148078,0.000542846,0.00231124,0.00231261], "NGC0801":[0.0145965,0.0147686,0.0148485,0.0149439,0.0142642,0.0170692,0.0140912,0.0140856,0.0158939,0.012627,0.0117715,0.00976886,0.00489046,0.00478268,0.00439073,0.00568192,0.00567577], "NGC0891":[0,0,0.00184367,0,0.00656692,0.0056604,0.00966425,0.00732042,0.0116544,0.0102561,0.0148148,0.0135015,0.0177281,0.0131064,0.0138469,0.0148026,0.00946681,0.0099929,0.00260893,0.00441589,0,0.0037243],
+    "NGC1003":[0.0114817,0.0119997,0.0122026,0.0123362,0.0138722,0.0138244,0.0132727,0.0117508,0.0119061,0.0107001,0.0105468,0.0103772,0.00754947,0.00789932,0.00572874,0.00731828,0.00492455,0.00646438,0.00326208,0.0051128,0.00226338,0.003867,0.00253125,0.00131446,0.00266803,0,0.00317365,0.0000409916,0.00258427,0.000217636,0.00225695,0.00157402,0.00174871,0.00159365,0.00310023,0.00363994,0.000752653,0.00490454,0.000929001,0.00104187], "NGC1090":[0.0061355,0.00530482,0.00620373,0.00570594,0.00744449,0.00758039,0.00932728,0.0110747,0.0119935,0.0124157,0.0125611,0.0117379,0.0102299,0.00969348,0.00865901,0.00834667,0.00640879,0.0071893,0.00546321,0.00658399,0.0053149,0.00595884,0.004324,0.00492174,0.00309536,0.00309139], "NGC1705":[0.0543994,0.0487945,0.0464683,0.0441015,0.034327,0.0160647,0.00888438,0.00606123,0.00271689,0.00287564,0.00124704,0.00222621,0.00127538,0.00206956,0.00107173,0.00173383,0.00136372,0.00136706], "NGC2366":[0.0179052,0.0180996,0.0181672,0.0181924,0.0192393,0.0202163,0.0222289,0.0216949,0.0248511,0.023004,0.0229136,0.0202872,0.0183523,0.0165177,0.0154348,0.0147582,0.01292,0.0121517,0.0100749,0.0100336,0.00708839,0.00847506,0.0056085,0.00771772,0.00398249,0.00556604,0.00213429,0.00379309,0.00141417,0.00141233], "NGC2403":[0.0331278,0.0180215,0.0286803,0.0169587,0.0280672,0.0173601,0.0284663,0.0173121,0.0282044,0.0206174,0.0216937,0.0236999,0.021391,0.0239695,0.0210894,0.0251883,0.0189291,0.0264676,0.0187979,0.0264916,0.0191481,0.0270911,0.0190395,0.0277385,0.0200482,0.0282093,0.0204745,0.0299577,0.0191939,0.0340589,0.0201157,0.0299282,0.0243255,0.0290712,0.0241018,0.0303896,0.0234826,0.0312194,0.021892,0.0287226,0.0229117,0.0236312,0.0195758,0.0209863,0.0173907,0.0201475,0.0163019,0.0185795,0.0156035,0.0162571,0.0136828,0.0136115,0.0125442,0.0111985,0.00972454,0.00888459,0.00810813,0.00688836,0.00587779,0.0040063,0.00548585,0.00290654,0.00427186,0.00197863,0.0032594,0.000974417,0.00286457,0.000288027,0.00238786,0,0.002779,0.000388184,0.00246637,0.000287719,0.000870975],
+    "NGC2683":[0,0.00556167,0.00941054,0.017228,0.00202746,0.00517177,0.00350847,0.00185022,0.00109908,0,0.000184417,0.000067832,0.000222065,0.000145388,0.000619494], "NGC2841":[0.0225611,0.0216371,0.0210434,0.0197793,0.0223563,0.020364,0.0228725,0.0219572,0.0215447,0.0236817,0.0224733,0.0248318,0.0242576,0.0272734,0.0267411,0.0292904,0.0283403,0.0308805,0.0281403,0.0281257,0.0302948,0.027956,0.0298416,0.028424,0.0276729,0.0293805,0.0269641,0.0268512,0.0148274,0.0127688,0.0128308,0.017374,0.0139401,0.00954825,0.00606207,0.00744703,0.00575222,0.0084995,0.00709663,0.00826732,0.0057381,0.00633453,0.00283657,0.00414451,0.000914003,0.00346274,0.00125013,0.00428259,0.00223813,0.00437002,0.00163681,0.00306582,0.000320691,0.000307103], "NGC2903":[0.01738,0.0129438,0.0144888,0.0156725,0.0149509,0.016859,0.0175179,0.0182054,0.018679,0.0185019,0.0183363,0.0178365,0.0170209,0.0142609,0.00946457,0.00921604,0.00851537,0.00843481,0.0095487,0.0102057,0.00785637,0.00416164,0.00343562,0.00288868,0.00279254,0.00170713,0.00159119,0.00153588,0.00128523,0.00110471,0.00122662,0.00101508,0.000895311,0.00123276,0.000500459,0.000497224], "NGC2915":[0.020701,0.0196268,0.019202,0.0188344,0.017166,0.0134672,0.0103886,0.00762236,0.00681724,0.00559314,0.00518098,0.00452215,0.0048767,0.0048454,0.00506929,0.00474497,0.00418729,0.00358144,0.00307544,0.0028353,0.00272663,0.003271,0.00244185,0.00350061,0.00203952,0.00249804,0.00190131,0.00223555,0.00144839,0.00195095,0.000803662,0.00163074,0.00000367828,0], "NGC2955":[0.0293445,0.027879,0.0270192,0.0254009,0.0287635,0.0303987,0.0301326,0.0355254,0.0343026,0.0355709,0.0304729,0.0303077,0.026286,0.0269609,0.0253308,0.026541,0.025062,0.0273409,0.0264346,0.0286914,0.0282856,0.0244054,0.0227639,0.0110461,0.0133188,0.00608158,0.0136127,0.0135796],
+    "NGC2976":[0.00505716,0.0197986,0.0279837,0.046556,0.0232581,0.0418719,0.0252671,0.0389027,0.0276278,0.0387695,0.0289958,0.0405556,0.0308308,0.0404944,0.032954,0.042029,0.034708,0.0455178,0.0404699,0.0498853,0.0394417,0.0537893,0.0391484,0.0476002,0.0405958,0.0398857,0.0318738,0.0101525,0.0220176,0,0.00427914], "NGC2998":[0.0166235,0.0135485,0.016459,0.0151444,0.0152377,0.0161899,0.0165828,0.0173323,0.0140889,0.011346,0.00918113,0.00725491,0.00406974,0.0025511,0.00256302], "NGC3109":[0.0107426,0.0109612,0.0110388,0.011076,0.0116527,0.0128538,0.0118445,0.0120834,0.0113319,0.0106442,0.00937882,0.00852383,0.00774111,0.00685713,0.00606951,0.0058702,0.0053138,0.0043579,0.00477172,0.00372385,0.00434003,0.00332444,0.00378104,0.00300783,0.00305158,0.00153277,0.0022787,0.000671971,0.00066654], "NGC3198":[0.0112645,0.00762583,0.00983144,0.00884445,0.00961323,0.00886158,0.00912137,0.0104368,0.00872709,0.0104992,0.00915269,0.0104285,0.00953544,0.0107925,0.0100708,0.0112829,0.0104373,0.0115428,0.0107039,0.0115384,0.0118652,0.0113501,0.0119792,0.0117129,0.0122839,0.0117267,0.0117454,0.0108211,0.00969949,0.00760007,0.00758999,0.00644791,0.00568836,0.00521056,0.00515882,0.00423031,0.00274176,0.0033156,0.00255476,0.00314142,0.00188968,0.00250605,0.00149437,0.000659385,0.000635061], "NGC3521":[0.00184489,0.00407639,0.00550386,0.0084945,0.00445379,0.00799886,0.00750358,0.00887911,0.00976017,0.0108474,0.0115835,0.0122537,0.013036,0.0133237,0.0147493,0.0114022,0.0169168,0.0130335,0.0193502,0.0162203,0.0213821,0.0175945,0.0221881,0.017278,0.0217742,0.0184146,0.0196448,0.0195845,0.0190373,0.0178207,0.0174306,0.0166372,0.0167147,0.0166092,0.0164977,0.0166561,0.0163648,0.016928,0.0167011,0.017782,0.0107956,0.00677489,0.00303466,0.00120592,0.00113516],
+    "NGC3726":[0.00761757,0.0104612,0.0119249,0.0148589,0.0112845,0.0176192,0.017474,0.0162288,0.016035,0.0164658,0.00945957,0.000625479,0.00293408,0.000305468,0.00290396,0.00291701], "NGC3741":[0.0138267,0.0131645,0.01288,0.012555,0.0120355,0.0102612,0.00825054,0.00716862,0.00618259,0.00566021,0.00490707,0.00490695,0.00475802,0.00454513,0.00438878,0.00327567,0.00312246,0.00262934,0.00211518,0.00181466,0.0012365,0.00117763,0.000728877,0.00084293,0.000845479], "NGC3769":[0.0318035,0.0293545,0.0284351,0.0277855,0.0222554,0.0187633,0.0140546,0.00873615,0.00642094,0.00387028,0.00497009,0.00250901,0.00131125,0.000518674,0.000994548,0.00101213], "NGC3877":[0.00716531,0.00768713,0.00793228,0.00832826,0.00779202,0.00938951,0.011051,0.0110406,0.01037,0.00966934,0.00822959,0.00653919,0.00611875,0.00453005,0.00364511,0.00227473,0.0022824], "NGC3893":[0.05953,0.044492,0.037644,0.0271918,0.0249435,0.0304433,0.027079,0.0130216,0.00738136,0.00649904,0.00506638,0.00449936,0.00419455,0.00421062],
+    "NGC3917":[0.0069281,0.00687118,0.00681389,0.00663346,0.0073865,0.00755009,0.00961839,0.00897387,0.006589,0.00737692,0.0105924,0.00599937,0.00834833,0.00882511,0.00484863,0.00743752,0.00166932,0.00366735,0.00272349,0.00164499,0.00164251], "NGC3949":[0.0246964,0.0267167,0.0275718,0.0283938,0.0328268,0.0344059,0.029391,0.0246731,0.0211903,0.0181331,0.018155], "NGC3953":[0.00429841,0.00463522,0.00477201,0.00490601,0.00518452,0.00583363,0.0073743,0.00877793,0.0086899,0.00636576,0.0034946,0.00350437], "NGC3972":[0.00566107,0.0087431,0.0102649,0.0130443,0.00913699,0.0119408,0.0122237,0.0104555,0.0118553,0.00882282,0.00946304,0.0046802,0.00387162,0.00388375], "NGC3992":[0.00767515,0.00726548,0.00691247,0.00561182,0.00962631,0.0112806,0.00905389,0.00500189,0.00209798,0.00268964,0.00123761,0.00224157,0.00224703],
+    "NGC4010":[0.0090973,0.0142493,0.0167752,0.0212049,0.017583,0.0138908,0.0153003,0.014123,0.0127923,0.0132941,0.0112608,0.0107102,0.00767728,0.00275052,0.00388651,0.00389962], "NGC4013":[0.00477011,0.00667351,0.00774033,0.00951077,0.0116483,0.0125933,0.0103112,0.00935488,0.00812405,0.00664631,0.00555424,0.00531083,0.00503639,0.00497682,0.0046008,0.00388219,0.00329202,0.00170808,0.00253173,0.000929971,0.00170024,0.000827923,0.00203124,0.000451198,0.00180638,0.000829803,0.0022296,0.000995778,0.00254441,0.00173079,0.00188844,0.000316156,0.00163961,0,0.00131207,0.0000908096,0.00115047,0.000399709,0,0.0017005], "NGC4051":[0.00838384,0.00828424,0.00816498,0.00773789,0.00961027,0.0108788,0.012867,0.0126429,0.00847177,0.00778895,0.00779723], "NGC4068":[0.0124532,0.0133603,0.0137468,0.0142183,0.0146915,0.0163382,0.0168406,0.0128734,0.00883772,0.00885695], "NGC4085":[0,0.00783515,0.0124244,0.021055,0.00817039,0.011686,0.0124856,0.00773181,0.00600139,0,0.000401951],
+    "NGC4088":[0.0221574,0.0202997,0.0191577,0.0164151,0.0247562,0.0259918,0.0282253,0.0233875,0.0188812,0.0148366,0.0083434,0.00771305,0.00330197,0.00381932,0,0.000166792], "NGC4100":[0.0091371,0.00974673,0.0100606,0.0105853,0.0110287,0.0111692,0.0105043,0.0101465,0.00927409,0.00840363,0.00757172,0.00713024,0.00671988,0.00686704,0.00672589,0.0067356,0.00608101,0.00565752,0.00550772,0.00418968,0.00308437,0.00154369,0.00186019,0.000899952,0.000951915,0.00040051,0.000598632,0.000600738], "NGC4138":[0.00831044,0.00892298,0.00930998,0.0102383,0.00834976,0.00310336,0.00156378,0.00275066,0.00130028,0.00156646,0.00157137], "NGC4157":[0.0213783,0.0223373,0.0227864,0.0234236,0.0248913,0.0190801,0.0211024,0.020458,0.023667,0.0166561,0.00754502,0.0112817,0.0083021,0.00492364,0.00547544,0.00752332,0.000206283,0.00548491,0,0.00616345,0.00625491], "NGC4183":[0.019037,0.0177311,0.0169645,0.0153035,0.0200671,0.0180548,0.017647,0.0187151,0.018303,0.014392,0.0156097,0.0149433,0.014171,0.00908139,0.0120203,0.00927883,0.00337786,0.00680926,0.00303079,0.00686078,0.000647453,0.00505128,0.00210536,0.00352437,0.00127473,0.00397083,0.00395777],
+    "NGC4214":[0.0533258,0.0481019,0.0459522,0.0438057,0.0344482,0.0162248,0.00892794,0.0060794,0.0027536,0.00291748,0.00126185,0.00223339,0.00129796,0.00208398,0.00109912,0.00174945,0.00140548,0.00140876], "NGC4217":[0.0138608,0.0160617,0.0171704,0.0189828,0.0191959,0.0112068,0.013251,0.011968,0.0145634,0.0099889,0.00875874,0.012646,0.00873463,0.0109067,0.0067528,0.00735264,0.003453,0.00655639,0.00222303,0.00652451,0.003483,0.00763001,0.0076479], "NGC4389":[0.00957314,0.00945392,0.00939485,0.00927586,0.00988016,0.00816141,0.00785018,0.00692394,0.00118864,0.00121074], "NGC4559":[0.014761,0.0151025,0.0152294,0.0153105,0.0159032,0.0177386,0.0206321,0.019396,0.0181747,0.0181421,0.0187851,0.0173985,0.017809,0.0168548,0.0161414,0.0156445,0.0148489,0.0169382,0.0143941,0.0144599,0.0112591,0.0124832,0.0111687,0.0117574,0.0106099,0.00994328,0.0101079,0.00959436,0.0090494,0.00825869,0.00820656,0.00634275,0.00641132,0.00461431,0.00480025,0.00480166], "NGC5005":[1.86683,1.32576,1.08867,0.784832,0.263359,0.138137,0.118556,0.111587,0.132991,0.0648447,0.0546265,0.0230144,0.0412748,0.00945292,0.0337325,0.00692723,0.0301581,0.0038896,0.0242675,0,0.0233215,0.0266389],
+    "NGC5033":[0.0166749,0.0153659,0.0146405,0.0135833,0.0161083,0.0147593,0.0185328,0.0139903,0.0152367,0.0115545,0.0124386,0.0123905,0.0110957,0.0104579,0.0101878,0.00688533,0.00506778,0.00198404,0.00160719,0.0012764,0.000422115,0.00102908,0.000181401,0.000807512,0,0.000499704], "NGC5055":[0.0117752,0.0149524,0.0118073,0.0151536,0.0123656,0.0150228,0.0127719,0.0173364,0.0157754,0.0178732,0.0149877,0.0172412,0.0134015,0.013533,0.0135695,0.0031032,0.00619107,0.000136676,0.00526378,0.00127047,0.00505235,0.000996663,0.00280118,0.00156613,0.00231294,0.00129852,0.00113144,0.000479803,0.000330665,0.000352862], "NGC5371":[0.00878812,0.00876775,0.00874165,0.00865484,0.00906268,0.00901379,0.00951844,0.00969816,0.0103768,0.0121641,0.0150453,0.0136594,0.012621,0.00772726,0.00404364,0.00362819,0.00131528,0.00215779,0.000167855,0.00138766,0.0000578928,0.00168223,0.00168095], "NGC5585":[0.0116588,0.011734,0.0116709,0.0125001,0.0117676,0.0124211,0.0117982,0.0123661,0.0117183,0.011923,0.0115194,0.0119873,0.0132957,0.0119418,0.0143225,0.0130196,0.0122944,0.0110185,0.00888011,0.00861219,0.00738884,0.00565314,0.00450865,0.00372134,0.0021516,0.00216017], "NGC5907":[0.0103851,0.0116015,0.012205,0.0133219,0.0122661,0.014553,0.0159295,0.0155764,0.0166448,0.0176498,0.0165514,0.00722516,0.0187305,0.00879553,0.00979262,0.00959334,0.00502026,0.0103811,0.00264912,0.0112012,0.00295397,0.0133796,0.0133728],
+    "NGC5985":[0.000688881,0.00125106,0.00154443,0.00199677,0.00218305,0.00274926,0.00324395,0.00392681,0.00447916,0.00498764,0.00561777,0.00622639,0.00693271,0.00769008,0.00843139,0.00859765,0.00899387,0.00904219,0.00888818,0.00865811,0.00804833,0.00805978,0.00810915,0.00758125,0.00787101,0.00734239,0.00761015,0.0073421,0.00610793,0.00684301,0.00518848,0.0059822,0.00391479,0.00309227,0.00383399,0.00157486,0.00157928], "NGC6015":[0.00537785,0.0126318,0.00930792,0.013535,0.0110564,0.0139516,0.0127811,0.0152452,0.0143679,0.016685,0.0158971,0.0180732,0.0177828,0.0180633,0.0194118,0.0190932,0.0201886,0.0199077,0.0204994,0.0203043,0.0199957,0.0182927,0.0176407,0.0170056,0.0146672,0.0130544,0.0109864,0.0101741,0.00865161,0.00818021,0.00700962,0.00746137,0.00502679,0.00772025,0.00401171,0.00713672,0.00377643,0.0068815,0.00332018,0.00679855,0.00588369,0,0.00879827,0.000838038,0.00985014,0.0123446], "NGC6195":[0.0153059,0.0169036,0.0177719,0.0194549,0.0166413,0.0196241,0.0176859,0.0204913,0.0191114,0.022113,0.0217288,0.0276541,0.026246,0.0304073,0.027559,0.0300151,0.0270924,0.0217604,0.0235685,0.015509,0.0155647,0.00549916,0.00870896,0.000719299,0.00690347,0.00139912,0.00129085], "NGC6503":[0.0121942,0.0123551,0.0125136,0.012984,0.0109326,0.0103976,0.00988325,0.00812302,0.00909525,0.00822902,0.00743126,0.0068197,0.00655844,0.00580159,0.00565543,0.00502824,0.00441314,0.00455075,0.00360521,0.00391087,0.00246877,0.00257778,0.00169607,0.00200192,0.00161327,0.00132039,0.00095232,0.000832449,0.000906244,0.000655895,0.00069885,0.000337971,0.000499675,0.000103399,0.000104143], "NGC6674":[0.00495297,0.00438301,0.00408502,0.00361751,0.00514953,0.0043988,0.00603542,0.00739454,0.00636192,0.00549938,0.00389258,0.00409097,0.00163559,0.00197095,0.00165748,0.000741866,0.000194925,0.0000151479,0.0000195637],
+    "NGC6789":[0.0333502,0.0327442,0.0326146,0.032824,0.0276592,0.0151411,0.00585111,0.00590496], "NGC6946":[0.0307695,0.0240438,0.0301815,0.0261863,0.0243982,0.027103,0.0236571,0.0268868,0.0241985,0.0275166,0.0256232,0.0296607,0.0262601,0.029037,0.0268463,0.0317245,0.0283346,0.0314741,0.0281244,0.0315912,0.0291249,0.0296026,0.0250947,0.0275576,0.0250393,0.0263733,0.019106,0.0202072,0.0224277,0.0155844,0.0283636,0.00673251,0.0316408,0.00716214,0.0358243,0,0.04909,0.00352379,0.0323815,0.010837,0.0347519,0.00570966,0.0277916,0,0.0396525,0,0.00677185,0.0340544,0,0.035243,0.00924141,0.0240015,0.0226585,0.013416,0.0383734,0.00612163,0.0425585,0.0125598,0.0384694,0.0677125], "NGC7331":[0.00536838,0.00748933,0.00863122,0.0104106,0.0120649,0.0128173,0.0143701,0.0150517,0.0161521,0.0163715,0.0171344,0.0171212,0.017954,0.0189706,0.0190584,0.0190274,0.0182598,0.0171645,0.0153214,0.0145037,0.0146643,0.0151113,0.0124377,0.0113821,0.00914414,0.00912848,0.00566155,0.00342759,0.00397842,0.00267693,0.00181546,0.000884534,0.000747677,0.000545074,0.0013196,0.00125053,0.000790877,0.0000566595,0.000767242,0.000767283], "NGC7793":[0.0508898,0.00951598,0.0310023,0.0111299,0.0305789,0.0141226,0.0292543,0.0147377,0.0262875,0.018459,0.0287782,0.0164227,0.0288168,0.0160397,0.0291422,0.0178785,0.0266343,0.0195621,0.0261358,0.0192314,0.0270442,0.0216421,0.0279094,0.0229282,0.0285174,0.0248054,0.0264056,0.0267413,0.0266327,0.02742,0.0276406,0.0266602,0.0273988,0.0237945,0.0253444,0.0225507,0.0153707,0.0210858,0.0126382,0.0201944,0.0114236,0.015968,0.00683175,0.00971833,0.00201821,0.00616709,0,0.00804196], "NGC7814":[0.0013457,0.00144885,0.0015019,0.00158333,0.00134973,0.00174657,0.0019336,0.00269675,0.00233574,0.00277115,0.00330637,0.00376848,0.00365803,0.00272505,0.00217286,0.00159462,0.00319298,0.00164519,0.00138507,0.000836893,0.000634865,0.000636397],
+    "PGC51017":[0.0243615,0.0217583,0.0207952,0.0200381,0.0119435,0.00580006,0.0050451,0.00269628,0.00332086,0.00332813], "UGC00128":[0.00549014,0.00627431,0.00668222,0.00729844,0.00559083,0.0072099,0.00623619,0.00676112,0.0068428,0.00794881,0.00725876,0.00663387,0.0060452,0.0044496,0.00466602,0.00180205,0.00250956,0.0012387,0.00221423,0.000404101,0.00146225,0.000098178,0.00116974,0.000113647,0.00130702,0.0012936], "UGC00191":[0.0142926,0.0146894,0.0148832,0.0151713,0.0153525,0.0157249,0.0158907,0.0159196,0.0164382,0.0152121,0.00851437,0.00195424,0.00198983], "UGC00634":[0.0193925,0.0173482,0.016647,0.0163109,0.0109136,0.00396294,0.000794298,0.000818963], "UGC00731":[0.00800628,0.0105481,0.011804,0.0140658,0.0110472,0.0137456,0.013751,0.0114077,0.013096,0.0134303,0.0136195,0.00873303,0.00792738,0.005213,0.00385019,0.00386253],
+    "UGC00891":[0.0171891,0.0161703,0.0158727,0.0159598,0.0124914,0.00604202,0.00194598,0.00258614,0.00259857], "UGC01230":[0.0138993,0.0144569,0.0147646,0.0152519,0.0135699,0.0140423,0.012588,0.0127682,0.011275,0.0101547,0.00852595,0.0034362,0.00052879,0.000838712,0.000864355], "UGC01281":[0,0,0,0.0829577,0,0.0912954,0.00102526,0.0811802,0.0117189,0.0790244,0.0182398,0.0821478,0.0200583,0.0822943,0.0233552,0.0828652,0.0265792,0.0821549,0.0267921,0.0822023,0.0229655,0.0820268,0.0276629,0.0837014,0.0335953,0.091697,0.0533156,0.120872,0.247545], "UGC02023":[0.00584902,0.00896615,0.0104199,0.0127885,0.0128922,0.00892653,0.00672638,0.00929573,0.00929402], "UGC02259":[0.0118744,0.0112564,0.0109195,0.0101863,0.0121328,0.0119645,0.00958883,0.00766296,0.00591189,0.00392422,0.000428992,0.000447335],
+    "UGC02455":[0.0175967,0.0190882,0.0197232,0.0205641,0.021878,0.0222368,0.022003,0.0202854,0.018082,0.0151144,0.0107538,0.0107754], "UGC02487":[0.000924234,0.0018204,0.002223,0.00278547,0.00314744,0.00429076,0.00566457,0.00513256,0.00415776,0.00301693,0.00252007,0.0022693,0.00260068,0.00211256,0.00202459,0.00124815,0.00110412,0.000312689,0.000554276,0.000555161], "UGC02885":[0.00713143,0.00871758,0.0095901,0.0112033,0.00837497,0.0101534,0.00936798,0.0118654,0.0148406,0.011804,0.0125546,0.0111296,0.0132606,0.0092324,0.00824844,0.0100898,0.00842975,0.00678266,0.00460621,0.00480522,0.00454181,0.00227859,0.00228433], "UGC02916":[0.0111889,0.0210836,0.0169152,0.0218344,0.0184798,0.0210728,0.0247087,0.020864,0.0255314,0.0217857,0.0261459,0.02262,0.0270284,0.0237399,0.0279557,0.0263288,0.0248363,0.0288168,0.0256326,0.0291771,0.0257204,0.029469,0.0251391,0.0296759,0.0243033,0.0295197,0.0251375,0.0241447,0.0267404,0.0240718,0.0269108,0.0237053,0.0273658,0.0240064,0.028564,0.0215405,0.0201542,0.00882169,0.00926143,0.00218917,0.00682831,0,0.00548041], "UGC02953":[0,0.000893665,0.0024829,0.00136353,0.00260019,0.00150371,0.00252539,0.00169488,0.00207587,0.00315574,0,0.00294688,0.00266433,0.00151801,0.000949478,0.00369365,0.00132454,0.00118991,0.00214022,0.00243358,0.00126613,0.00283267,0.000936673,0.00292705,0.00100153,0.00280274,0.00208828,0.000738043,0.00455464,0.00123576,0.00414686,0.00251057,0.00442848,0.00336529,0.00449875,0.00522387,0.00358731,0.00580487,0.00383031,0.00552306,0.00563734,0.00448888,0.00565352,0.00617106,0.00451344,0.00616108,0.00523142,0.00626191,0.00561748,0.00577309,0.00631619,0.00675826,0.00622985,0.00495378,0.00429268,0.00452456,0.00478716,0.00468152,0.00460017,0.00400917,0.0032088,0.00227731,0.00179598,0.00157756,0.00243467,0.00147457,0.00218535,0.00212707,0.00220835,0.00210437,0.00135156,0.00171451,0.00095857,0.00170962,0.00127384,0.00133377,0.00130804,0.000864396,0.000983578,0.00107921,0.000845742,0.000744616,0.000505045,0.000826214,0.00029381,0.000524248,0,0.000533053,0.0000200581,0.00013683,0,0],
+    "UGC03205":[0.00243805,0.0118901,0.00682265,0.0124461,0.00760661,0.0124392,0.00770712,0.0112772,0.0087087,0.0118373,0.0092595,0.0122713,0.00969143,0.012603,0.0100373,0.0126594,0.0113631,0.0123642,0.0118111,0.0126137,0.012128,0.0128189,0.0124703,0.0133855,0.0130937,0.0139128,0.0135579,0.014354,0.0150778,0.0146211,0.0154017,0.0145535,0.0137636,0.0228672,0.0051104,0.0183111,0.00926279,0.0138918,0.00493746,0.00962605,0.0016764,0.00770084,0,0.00761323,0.0108665], "UGC03546":[0.00423835,0.00390891,0.00370506,0.0032903,0.00400554,0.00349733,0.00394779,0.00340264,0.00397204,0.00436785,0.00352518,0.00433766,0.00369321,0.00404045,0.00383378,0.00404911,0.00383592,0.00406304,0.0037301,0.0042327,0.00503984,0.00623414,0.00702232,0.00736971,0.00674521,0.00526684,0.00419236,0.00253855,0.00209303,0.00106196,0.000794,0.00018412,0.00041394,0.000409629], "UGC03580":[0.0268475,0.00400065,0.0206825,0.00812234,0.0178807,0.00985206,0.016781,0.0130927,0.0159615,0.0131984,0.016205,0.0152229,0.0128346,0.0175524,0.012524,0.018259,0.0129634,0.0180124,0.0143582,0.0164747,0.0155114,0.0165687,0.0156876,0.0169994,0.0157157,0.0172999,0.0158363,0.0174676,0.0159309,0.0161073,0.0134883,0.0147633,0.0107087,0.0124197,0.00864931,0.0128096,0.00993902,0.0110487,0.00733158,0.00772289,0.00457726,0.00528075,0.00268146,0.00350499,0.00110136,0.00152677,0,0.00087432], "UGC04278":[0.00407174,0.00477177,0.00506681,0.0053526,0.00641948,0.00712404,0.00478483,0.00355353,0,0.00425296,0.00565712,0.00776791,0.00748767,0.00578367,0.00722811,0.00591797,0.00825005,0.00767978,0.0103481,0.010483,0.0148534,0.0130608,0.0207486,0.0162117,0.0196796,0.0152666,0.0135615,0,0.00208553], "UGC04305":[0.0191089,0.0143357,0.0117599,0.00688859,0.0171796,0.015236,0.0133498,0.0157009,0.0139185,0.0143944,0.0137056,0.0167232,0.0146595,0.0194748,0.0141022,0.0179944,0.0144081,0.0123219,0.0128877,0.00920788,0.0105376,0.00730612,0.00818014,0.00568686,0.00638821,0.00635531],
+    "UGC04325":[0.0175927,0.017532,0.0173869,0.0167403,0.0202713,0.0217131,0.0188136,0.0150926,0.0112327,0.00850936,0.00637452,0.00639385], "UGC04483":[0.0229041,0.0228876,0.022891,0.0229216,0.0229273,0.0200518,0.0156783,0.0117023,0.0087488,0.00687334,0.00439707,0.00441885], "UGC04499":[0.0106717,0.0127648,0.0135995,0.0144806,0.0179044,0.0206177,0.0156262,0.012526,0.00973218,0.00681444,0.00770968,0.00206501,0.0020871], "UGC05005":[0.0127061,0.0117736,0.0113048,0.0106559,0.0117378,0.00959665,0.00970811,0.00878524,0.00858608,0.00843775,0.00490828,0.0032128,0.00347147,0.00133784,0.00134588], "UGC05253":[0,0.00737048,0.0129838,0.0109458,0.0137326,0.0116317,0.0130771,0.0136865,0.0125074,0.0137025,0.0122197,0.011581,0.0201593,0.000996277,0.0273445,0.0000691771,0.0287842,0,0.0214096,0.0115017,0.0106206,0.0145308,0.0178758,0.00965039,0.0112929,0.0176898,0.0144656,0.0101278,0.0132992,0.0189049,0.0114583,0.0107217,0.0176523,0.0142642,0.00771934,0.0182489,0.0157669,0.0110333,0.0116803,0.0199066,0.0121524,0.0104526,0.0211344,0,0.021034,0.0159708,0.0115352,0.0135289,0.018193,0.0104969,0.0124219,0.0164534,0.0177284,0.00791925,0.0182032,0.00721651,0.0160197,0.00624011,0.0150459,0.00590548,0.0143411,0.00588313,0.0129615,0.00387947,0.0102344,0.00249552,0.00930009,0.00231717,0.00915695,0.00326086,0.00977737,0.00426502,0.0196894],
+    "UGC05414":[0.00995046,0.0143074,0.0163338,0.0195444,0.0199109,0.0161612,0.0113202,0.00800066,0.00614031,0.00616024], "UGC05716":[0.0104947,0.0105101,0.0105143,0.0105071,0.0107433,0.010326,0.0100039,0.00947949,0.00875535,0.00766476,0.00588752,0.00448885,0.00291159,0.00179788,0.000931887,0.000941319], "UGC05721":[0.0310232,0.032775,0.0316895,0.0318455,0.0298506,0.0293875,0.0272376,0.0270919,0.026922,0.0270775,0.0219304,0.0144246,0.00859827,0.00946423,0.0133387,0.00951927,0.00847562,0.00752041,0.00795291,0.00702713,0.00576977,0.00371013,0.00350232,0.00251289,0.00252314], "UGC05750":[0.00875721,0.00952615,0.00917334,0.00899696,0.00851486,0.00856527,0.00784491,0.0076705,0.0068174,0.00668036,0.00543788,0.00380381,0.00381082], "UGC05764":[0.0170933,0.0176217,0.0178607,0.0182169,0.0184752,0.0183126,0.017531,0.0154483,0.0122183,0.00915113,0.00607294,0.0034704,0.00279598,0.00281272],
+    "UGC05829":[0.0134581,0.0115346,0.01043,0.00793294,0.014934,0.0122547,0.0146733,0.0192908,0.016597,0.0180527,0.0161421,0.0164136,0.00948281,0.0101409,0.0101388], "UGC05918":[0.00820543,0.00708355,0.00661372,0.00602698,0.00455247,0.00534291,0.00751094,0.00506335,0.0032119,0.00415704,0.00335335,0.00335479], "UGC05986":[0.0131692,0.00896619,0.00667955,0.00216638,0.0107389,0.014526,0.0130051,0.0135544,0.0144111,0.0136546,0.0111313,0.00804016,0.00641132,0.00773475,0.00442028,0.00559768,0.00535003,0.00787538,0.00787282], "UGC05999":[0.0189715,0.0172673,0.0165332,0.0155007,0.0150245,0.0116263,0.0100468,0.0146061,0.014596], "UGC06399":[0.0083326,0.00899294,0.0093152,0.00989675,0.00907782,0.0102456,0.00968341,0.0090296,0.00905617,0.00574441,0.00519597,0.00473604,0.0047429],
+    "UGC06446":[0.0138191,0.0130315,0.0125418,0.0114321,0.0150502,0.0136268,0.0149236,0.0177795,0.0115847,0.012621,0.0158445,0.0136845,0.013421,0.0120879,0.0100302,0.00949876,0.00403027,0.00334052,0.00511872,0.00237894,0.00238349], "UGC06614":[0,0.000254583,0.00101294,0.00181679,0.00289459,0.00422179,0.00398625,0.00475246,0.00448051,0.00592699,0.00614829,0.00640902,0.00621557,0.00654542,0.00549718,0.00105606,0.00107596], "UGC06628":[0.0133746,0.0106074,0.00913854,0.00620013,0.0120222,0.012988,0.0099385,0.0116196,0.0101613,0.00985513,0.00985725], "UGC06667":[0.00105949,0.00599666,0.00848247,0.0132401,0.00403481,0.0156946,0.0072633,0.0102939,0.00630419,0.00521002,0.0040695,0,0.00122401], "UGC06786":[0.000570003,0.0087773,0.00517858,0.00837576,0.00636497,0.00879932,0.00744087,0.00891763,0.00720977,0.00866214,0.0073942,0.00890183,0.00758099,0.00932314,0.00701113,0.0102901,0.00778883,0.00827116,0.00931903,0.00866852,0.00776425,0.0106043,0.00755807,0.00887618,0.00928038,0.00815728,0.00914405,0.00876172,0.00891366,0.00775154,0.00714002,0.00678671,0.0067792,0.00529139,0.00378892,0.00278611,0.00177561,0.00114101,0.000717875,0.000646295,0.000388008,0.00040272,0.000194188,0.0000479791],
+    "UGC06787":[0.00203732,0.00394798,0.00359592,0.004091,0.00393952,0.00364614,0.0038724,0.00379206,0.00356081,0.00452581,0.00331025,0.00462871,0.00324086,0.00463998,0.0031824,0.00538873,0.00233446,0.00628124,0.0031531,0.00618354,0.00454461,0.00661434,0.00416709,0.00856535,0.00200807,0.00985979,0.00346816,0.00743606,0.00534605,0.00791051,0.00537378,0.00818787,0.00610274,0.00837108,0.00604274,0.00862329,0.00600606,0.00802031,0.0060373,0.00722262,0.00465367,0.00684393,0.00312201,0.00558529,0.00238355,0.00518349,0.00248511,0.00521936,0.00249235,0.00520511,0.00265172,0.00579818,0.00322764,0.00570431,0.00327362,0.00396227,0.0024216,0.00276379,0.00151607,0.0017661,0.000756265,0.00112896,0.000290963,0.000563757,0], "UGC06818":[0.00688447,0.00640975,0.00619133,0.00584402,0.00576013,0.00659908,0.00631706,0.00616229,0.00593228,0.00387983,0.00366981,0.00367589], "UGC06917":[0.00673746,0.00840048,0.00924065,0.0108175,0.00920949,0.0130488,0.0131371,0.0110283,0.0120993,0.0107261,0.0100305,0.00828077,0.0102696,0.00703835,0.00704373], "UGC06923":[0.0317356,0.0282444,0.0267741,0.0249106,0.0227434,0.0173733,0.0134906,0.0123309,0.00791273,0.00794097], "UGC06930":[0.0116906,0.0118538,0.0118182,0.0113815,0.0144105,0.0168726,0.0135615,0.0118436,0.0115242,0.00872836,0.00574325,0.00260031,0.00373637,0.00375158],
+    "UGC06973":[0.00628103,0.0116564,0.0144241,0.0196968,0.0186487,0.0150971,0.0135063,0.0128084,0.00782964,0.00341154,0.0031979,0,0.000072832], "UGC06983":[0.0101333,0.0103617,0.0104154,0.0102714,0.0113217,0.011686,0.0145566,0.0148132,0.0123619,0.0163215,0.0124707,0.009754,0.0116473,0.0102911,0.00841747,0.00687571,0.00617911,0.0038939,0.00358632,0.00195739,0.00196401], "UGC07089":[0.0102191,0.0109873,0.011407,0.012286,0.0106735,0.00952139,0.00749175,0.0079623,0.00853499,0.00671058,0.00679234,0.00570894,0.00517583,0.00322257,0.00301173,0.00302212], "UGC07125":[0.0103335,0.0152998,0.0181977,0.0246926,0.00602746,0.0127002,0.00638282,0.00948252,0.00857195,0.00860421,0.00805277,0.00902919,0.00233863,0.00491993,0.000946942,0,0.00155402], "UGC07151":[0.00960889,0.00974636,0.00978623,0.00980439,0.00891307,0.0151573,0.0174118,0.0192844,0.0126199,0.0128825,0.0138144,0.0040963,0.0103517,0.00296048,0.00300594],
+    "UGC07232":[0.0208999,0.0206593,0.0206008,0.020665,0.0202447,0.016132,0.0110372,0.0110629], "UGC07261":[0.00915026,0.009289,0.00940285,0.00976655,0.0075314,0.0100897,0.0120814,0.0104936,0.0113177,0.00887682,0.00888243], "UGC07323":[0.0097049,0.00934962,0.00914507,0.00867928,0.0100829,0.00822497,0.0115295,0.014442,0.0121259,0.0155525,0.0129377,0.00901631,0.00821175,0.00822062], "UGC07399":[0.0164918,0.0168963,0.0170042,0.0168797,0.0200347,0.0178046,0.0140036,0.0120402,0.00765193,0.00705917,0.00722431,0.00551455,0.00208674,0.00210349], "UGC07524":[0.00994115,0.00956744,0.00934545,0.00888778,0.0100337,0.00944534,0.0110012,0.0109709,0.0106771,0.0117738,0.0124881,0.0128796,0.0132333,0.0133364,0.0121675,0.0121314,0.0103921,0.0102383,0.00859693,0.0103642,0.00903148,0.0106495,0.0096619,0.00949123,0.00996395,0.00915141,0.00989136,0.00854541,0.00847072,0.0075437,0.00713147,0.00623355,0.00557345,0.00508095,0.00507882],
+    "UGC07559":[0.0110495,0.0115476,0.0118334,0.0124592,0.0111237,0.00984707,0.00905022,0.00885408,0.00813793,0.00567196,0.005683], "UGC07577":[0,0.00157727,0.00242062,0.00368613,0.00399284,0.00604272,0.00632749,0.00419508,0.00487645,0.00420988,0.0028869,0.00259423,0.00259823], "UGC07603":[0.0215686,0.0183771,0.0169535,0.0148936,0.0139588,0.0107813,0.0165863,0.0163138,0.00815682,0.00532641,0.00262208,0.00474207,0.00295152,0.00349009,0.00103079,0.00103855], "UGC07608":[0.0156907,0.0144082,0.0138637,0.0131499,0.0118578,0.0128953,0.0116172,0.00994411,0.0108351,0.00865742,0.00805079,0.00805919], "UGC07690":[0.0148611,0.0186677,0.0205923,0.0241239,0.0202224,0.0165116,0.0130148,0.00845533,0.00656031,0.00327711,0.00330202],
+    "UGC07866":[0.0127123,0.0104948,0.0095034,0.00808658,0.00657948,0.00900205,0.00861016,0.0067064,0.00651506,0.00124233,0.00126084], "UGC08286":[0,0.00417987,0.00748571,0.0131735,0.0073159,0.0132798,0.0121059,0.0114057,0.00911448,0.0118102,0.0107777,0.0110307,0.0113206,0.00337736,0.00900095,0.000513631,0.00975108,0.0031892,0.00440397,0.00267171,0.00269108], "UGC08490":[0.0197392,0.021975,0.0230285,0.0244784,0.0269616,0.0212253,0.0217432,0.0190164,0.0171693,0.0198832,0.0136037,0.0139088,0.0112701,0.0125623,0.00846418,0.00647413,0.00648993,0.00306292,0.00415405,0.00528361,0.00401158,0.00382673,0.00307683,0.00332685,0.00426169,0.00151446,0.00184322,0.00280348,0.00154998,0.00128672,0.00126627,0.00178163,0.00136574,0.0013679], "UGC08550":[0.0181458,0.0139585,0.0118232,0.0077195,0.0146221,0.0124221,0.00981599,0.00739044,0.00654673,0.00875774,0.00618075,0.0101465,0.0051147,0.00630441,0.00629233], "UGC08699":[0.0148788,0.0135578,0.0149016,0.0132723,0.0158942,0.0127303,0.0156924,0.0127525,0.015421,0.0128763,0.0145938,0.0130779,0.0145446,0.0130725,0.0146624,0.0107062,0.0128049,0.0122201,0.0100458,0.0136393,0.00999899,0.0138583,0.00966248,0.0141386,0.00949453,0.0141398,0.00923601,0.0141517,0.00898802,0.0137467,0.00847173,0.0132433,0.00804462,0.0119222,0.00837583,0.00894267,0.00392513,0.00537881,0.00185951,0.00356121,0.0000512581,0.00271757,0.00253131],
+    "UGC08837":[0.00258042,0.0052052,0.00632377,0.00782572,0.00908477,0.0134172,0.0159903,0.00966614,0.00821109,0.00978686,0.00564509,0.0056543], "UGC09037":[0.0236087,0.0263296,0.0278981,0.031627,0.0235555,0.0306034,0.028857,0.028764,0.0250484,0.022592,0.021284,0.0256724,0.0217815,0.0183045,0.0189567,0.0109082,0.0123337,0.00868817,0.0148741,0.00164296,0.0116999,0.00335116,0.00741738,0.00854351,0.00390421,0.00387159], "UGC09133":[0,0.0123521,0.0125165,0.0130706,0.0126498,0.0124916,0.0140442,0.0119192,0.0137127,0.0108225,0.0163005,0.0101355,0.0145977,0.011988,0.0130103,0.00938421,0.020895,0,0.0212494,0.0169096,0,0.0269347,0.00675696,0.0164519,0.0100664,0.0105364,0.0175755,0.00565605,0.0165427,0.00851052,0.0150417,0.00827503,0.0159568,0.0084632,0.0133731,0.00794997,0.012277,0.00824344,0.0108799,0.00766399,0.00988539,0.00623739,0.00702844,0.00369769,0.00464109,0.00261847,0.00428077,0.0029301,0.00453002,0.00205585,0.00319853,0.00214202,0.00357011,0.00249164,0.00221623,0.00185569,0.00187517,0.00138977,0.00192626,0.0013406,0.00161098,0.00099998,0.00116519,0.00064239,0.000873161,0.000534076,0.000711602,0,0], "UGC09992":[0.0160583,0.0138773,0.0129485,0.01171,0.0102917,0.00865061,0.00501513,0.00148823,0.00150954], "UGC10310":[0.0116818,0.0113497,0.011139,0.0106193,0.0122406,0.0129246,0.0139892,0.0128697,0.00690052,0.00422296,0.00424328],
+    "UGC11455":[0.0113637,0.00569214,0.00970516,0.00614864,0.0101965,0.00583143,0.00981031,0.00641061,0.0098737,0.00676396,0.0101657,0.00721608,0.0106376,0.00758941,0.011484,0.00963993,0.0141737,0.00996566,0.0113122,0.00823652,0.00965284,0.00724053,0.0108327,0.00721226,0.01167,0.00910554,0.017524,0.00733604,0.00463056,0.00413376,0.00079305,0.00525193,0.00336107,0.00127339,0.00184478,0.00340814,0,0.00228649], "UGC11557":[0.0075854,0.00710139,0.00690181,0.00671355,0.00540899,0.00376369,0.00807268,0.0122767,0.00950662,0.010817,0.0117071,0.00877992,0.0141024,0.00665557,0,0.00020466], "UGC11820":[0.0119138,0.0120565,0.0121214,0.0121858,0.0126317,0.0123457,0.0125935,0.0124861,0.0130526,0.0126606,0.00709499,0.00350677,0.00331426,0.00332699], "UGC11914":[0.00715621,0.00423374,0.0045834,0.00999522,0.0027679,0.00925478,0.0039594,0.00874609,0.00416124,0.00832593,0.00439256,0.00828417,0.00456026,0.00822109,0.00460036,0.00828245,0.00456183,0.00840487,0.00459656,0.0083309,0.00466955,0.00835512,0.00463485,0.00829897,0.00461865,0.00837537,0.00518138,0.00732364,0.00573508,0.00731766,0.00590437,0.00742059,0.00608023,0.00799801,0.00683134,0.00826727,0.00773513,0.00886193,0.00901772,0.0102343,0.00965157,0.0097734,0.011139,0.00912926,0.0118887,0.010634,0.0106274,0.00943417,0.00983421,0.00780907,0.00429059,0,0], "UGC12506":[0.0501368,0.0476821,0.0465449,0.045373,0.0409621,0.0317006,0.0192897,0.0156425,0.0119613,0.0167882,0.0190794,0.0223086,0.0241847,0.0220896,0.019485,0.0163726,0.0129683,0.0117444,0.0111349,0.0126136,0.0129366,0.0116269,0.00955384,0.00569799,0.00885197,0.00676881,0.0102159,0.00643594,0.00869212,0.00565326,0.0099264,0.0087582,0.01222,0.00793265,0.00789276],
+    "UGC12632":[0.00966085,0.0089521,0.00852753,0.00757071,0.0104734,0.0100139,0.00997409,0.00815826,0.00807584,0.00935988,0.00796033,0.00992118,0.00894168,0.00906032,0.00623889,0.00601461,0.00502553,0.00374785,0.00375105], "UGC12732":[0.0117663,0.00911439,0.00771466,0.00510591,0.00901151,0.0112779,0.0109323,0.0110821,0.0117765,0.00976503,0.0104617,0.0112551,0.00919304,0.0103602,0.00983897,0.0100219,0.00845779,0.00803744,0.00542215,0.00543002], "UGCA281":[0.0180635,0.0178608,0.0178304,0.0179574,0.0158963,0.013074,0.0103244,0.00772511,0.00523936,0.00282648,0.00284479], "UGCA442":[0.0277261,0.0265141,0.0260476,0.0256429,0.0230459,0.0157617,0.00853619,0.00415176,0.000900646,0.000064115,0.00018111,0.000197422], "UGCA444":[0.0250972,0.0213894,0.0193412,0.0151625,0.0217768,0.0184035,0.02346,0.0199225,0.0240783,0.0206916,0.0244189,0.0203198,0.0229034,0.0191334,0.0194044,0.0163116,0.0162025,0.0151243,0.0118262,0.0118687,0.00983518,0.00949347,0.00814836,0.00788493,0.00737352,0.00585502,0.00568857,0.00555196,0.0042059,0.00461099,0.00331542,0.00420456,0.00153772,0.00367532,0.000778261,0.00118146,0,0.000400571,0.000127147,0.000604764]
+};

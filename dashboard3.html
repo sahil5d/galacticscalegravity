@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard3: a_gravformula with a-term variations</title>
+<link rel="stylesheet" href="./dashboard.css">
+</head>
+<body>
+<div class="container" id="dashboard-root"></div>
+
+<script src="./data_dashboard3.js"></script>
+<script src="./dashboard_common.js"></script>
+<script>
+initGravityDashboard({
+  activeNav: 'd3',
+  data: DATA_GRAV3,
+  formulaKeys: DASHBOARD3_KEYS,
+  formulaMeta: DASHBOARD3_META,
+  winFormulaKeys: DASHBOARD3_KEYS.filter(k => k !== 'f1'),
+  defaultFormula: DASHBOARD3_KEYS.includes('f5_planck') ? 'f5_planck' : DASHBOARD3_KEYS[0],
+  defaultSortKey: (DASHBOARD3_KEYS.includes('f5_planck') ? 'f5_planck' : DASHBOARD3_KEYS[0]) + '_med',
+  primaryHighlightKeys: ['f5_planck', 'f5'],
+  mainTitleHtml: 'Dashboard3: a_gravformula with a-term variations',
+  searchPlaceholder: 'Search galaxy (NGC2841)',
+  allFormulasBtnLabel: 'All a-Term Variations',
+  bestColHeader: 'Best a-Term Variant',
+  benchTitleTopic: 'a-Term & Screening'
+});
+</script>
+</body>
+</html>

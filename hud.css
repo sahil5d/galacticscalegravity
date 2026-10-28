@@ -1,0 +1,241 @@
+#theinfo {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    background: rgba(10, 10, 18, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 10px 12px;
+    border-radius: 1px;
+    pointer-events: none;
+    font-size: 13px;
+    line-height: 1.5;
+    z-index: 10;
+}
+
+#top-nav {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+}
+
+#hud-controls {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    width: 342px;
+    height: 52px;
+    background: rgba(10, 10, 18, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 1px;
+    padding: 8px 8px;
+    box-sizing: border-box;
+    z-index: 10;
+}
+
+.hud-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#gal-select {
+    flex: 1;
+    min-width: 0;
+}
+
+#hud-controls select,
+#hud-controls button,
+#top-nav a {
+    pointer-events: auto;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+#gal-select,
+#gal-prev-btn,
+#gal-next-btn,
+#gal-random-btn,
+#gal-rotate-btn {
+    height: 22px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 1px;
+    padding: 0 6px;
+    line-height: 20px;
+    cursor: pointer;
+    outline: none;
+}
+
+#gal-prev-btn,
+#gal-next-btn,
+#gal-random-btn,
+#gal-rotate-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+#gal-prev-btn,
+#gal-next-btn {
+    padding: 0 5px;
+    font-weight: 700;
+}
+
+#gal-rotate-btn.active {
+    border-color: rgba(56, 189, 248, 0.55);
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+}
+
+#gal-select:hover,
+#gal-prev-btn:hover,
+#gal-next-btn:hover,
+#gal-random-btn:hover,
+#gal-rotate-btn:hover {
+    border-color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.14);
+}
+
+#gal-select option {
+    background: #0a0a12;
+    color: #f8fafc;
+}
+
+.header-nav {
+    display: inline-flex;
+    vertical-align: middle;
+    background: #252530;
+    border-radius: 2px;
+    padding: 2px;
+    gap: 2px;
+    pointer-events: auto;
+}
+
+.nav-pill {
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 3px 8px;
+    border-radius: 2px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.nav-pill:hover {
+    color: #f8fafc;
+}
+
+.nav-pill.active {
+    background: #151520;
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.4);
+    font-weight: 600;
+}
+
+.hud-controls-hint {
+    display: block;
+    margin-top: 5px;
+    font-size: 10px;
+    color: #64748b;
+    white-space: nowrap;
+}
+
+#hud-mode-bar,
+#density-scale-bar {
+    position: fixed;
+    left: 16px;
+    width: 342px;
+    display: flex;
+    gap: 4px;
+    background: rgba(10, 10, 18, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 1px;
+    padding: 4px;
+    box-sizing: border-box;
+    z-index: 10;
+}
+
+#hud-mode-bar {
+    bottom: 568px;
+}
+
+#density-scale-bar {
+    bottom: 534px;
+}
+
+.hud-mode-btn,
+.density-scale-btn {
+    flex: 1;
+    background: transparent;
+    color: #94a3b8;
+    border: 1px solid transparent;
+    border-radius: 1px;
+    padding: 4px 2px;
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+}
+
+.hud-mode-btn.no-bulge {
+    opacity: 0.45;
+}
+
+.hud-mode-btn:hover,
+.density-scale-btn:hover {
+    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.hud-mode-btn.active[data-mode="all"],
+.density-scale-btn.active {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.55);
+}
+
+.hud-mode-btn.active[data-mode="dsk"] {
+    background: rgba(239, 68, 68, 0.20);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.55);
+}
+
+.hud-mode-btn.active[data-mode="blg"] {
+    background: rgba(34, 197, 94, 0.20);
+    color: #4ade80;
+    border-color: rgba(34, 197, 94, 0.55);
+}
+
+.hud-mode-btn.active[data-mode="gas"] {
+    background: rgba(59, 130, 246, 0.20);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.55);
+}
+
+#accel-hud,
+#sb-hud {
+    position: fixed;
+    left: 16px;
+    width: 340px;
+    height: 220px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 1px;
+    box-sizing: content-box;
+    pointer-events: none;
+}
+
+#accel-hud {
+    bottom: 306px;
+}
+
+#sb-hud {
+    bottom: 74px;
+}

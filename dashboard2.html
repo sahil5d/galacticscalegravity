@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard2: a_gravformula vs a_obs</title>
+<link rel="stylesheet" href="./dashboard.css">
+</head>
+<body>
+<div class="container" id="dashboard-root"></div>
+
+<script src="./data_dashboard2.js"></script>
+<script src="./dashboard_common.js"></script>
+<script>
+initGravityDashboard({
+  activeNav: 'd2',
+  data: DATA_GRAV,
+  formulaKeys: DASHBOARD2_KEYS,
+  formulaMeta: DASHBOARD2_META,
+  winFormulaKeys: DASHBOARD2_KEYS,
+  defaultFormula: 'f5',
+  defaultSortKey: 'f5_med',
+  primaryHighlightKeys: ['f5', 'f2', 'f4'],
+  profileDrawOrder: ['f1', 'f3', 'f4', 'f2', 'f5'],
+  mainTitleHtml: 'Dashboard2: a_gravformula vs a_obs',
+  searchPlaceholder: 'Search galaxy (NGC3198)',
+  allFormulasBtnLabel: 'All Formulas',
+  bestColHeader: 'Best Formula',
+  benchTitleTopic: 'Gravity Formula'
+});
+</script>
+</body>
+</html>

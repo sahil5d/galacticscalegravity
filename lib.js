@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// 1. PHYSICAL CONSTANTS, SI UNITS & MASS-TO-LIGHT COEFFICIENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
 if (typeof THREE === 'undefined') {
     globalThis.THREE = { Vector3: function (x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } };
 }
@@ -16,6 +20,10 @@ const Lsun = 3.83e26; // W
 const coeff_dsk = 0.5;
 const coeff_blg = 0.7;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. 3D SCENE MARKER & LINE HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
 function trim(arg) {
     if (typeof arg === 'number') {
         // return parseFloat(arg.toPrecision(3));
@@ -23,14 +31,6 @@ function trim(arg) {
     } else {
         return { x: trim(arg.x), y: trim(arg.y), z: trim(arg.z) };
     }
-}
-
-// input from 0 to 1
-function floattohexgray(f) {
-    // const val = Math.min(255, Math.max(0, Math.round(f * 255)));
-    const val = Math.floor(f * 255);
-    const hex = val.toString(16).padStart(2, '0');
-    return '#' + hex.repeat(3);
 }
 
 function plotpoint(point, arghex = '#ffffff', argr = .02) {
@@ -49,6 +49,28 @@ function plotpoint(point, arghex = '#ffffff', argr = .02) {
     scene.add(sphere);
 }
 
+// Render multiple sphere markers in a single GPU draw call
+function plotpoints_instanced(pointsList, arghex = '#ffffff', argr = 0.6) {
+    if (!pointsList || pointsList.length === 0) return null;
+    const geometry = new THREE.SphereGeometry(argr, 12, 8);
+    const material = new THREE.MeshBasicMaterial({ color: arghex });
+    const mesh = new THREE.InstancedMesh(geometry, material, pointsList.length);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < pointsList.length; i++) {
+        const pt = pointsList[i];
+        if (typeof pt === 'number') {
+            dummy.position.set(pt, 0, 0);
+        } else {
+            dummy.position.set(pt.x, pt.y || 0, pt.z || 0);
+        }
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    scene.add(mesh);
+    return mesh;
+}
+
 function plotlinesegment(argvec, argorigin, arghex = '#ffffff') {
     const points = [argorigin, argorigin.clone().add(argvec)];
 
@@ -60,91 +82,137 @@ function plotlinesegment(argvec, argorigin, arghex = '#ffffff') {
     scene.add(line);
 }
 
-function plotcube(point, arghex = '#ffffff', args = .3) {
-    const geometry = new THREE.BoxGeometry(args, args, args);
-    const material = new THREE.MeshBasicMaterial({ color: arghex, wireframe: false });
-    const cube = new THREE.Mesh(geometry, material);
-    cube.position.x = point.x;
-    cube.position.y = point.y;
-    cube.position.z = point.z;
-    scene.add(cube);
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. GPU-INSTANCED 3D CUBE VOXEL RENDERER & O(log N) DENSITY SCALING
+// ═══════════════════════════════════════════════════════════════════════════
 
-// Render thousands of cubes in a single GPU draw call with additive light
+// Render all voxels as 3D cubes in a single GPU draw call using THREE.InstancedBufferGeometry + THREE.ShaderMaterial with additive light.
+// Uses an 8-vertex indexed cube, an Int16Array 'instancePos' attribute (6 bytes/voxel), a Float32Array 'instanceRho' attribute (4 bytes/voxel),
+// and 'invDenom' uniform with O(log N) binary-searched geometry.instanceCount culling of zero-brightness (q <= 0) cubes.
 function plotcubes_instanced(items, size = 1) {
-    const geometry = new THREE.BoxGeometry(size, size, size);
-    const material = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+    let positions, rhos;
+    if (items && (items.positions instanceof Int16Array || items.positions instanceof Float32Array) && items.rhos instanceof Float32Array) {
+        positions = items.positions;
+        rhos = items.rhos;
+    } else {
+        const n = items ? items.length : 0;
+        positions = new Int16Array(n * 3);
+        rhos = new Float32Array(n);
+        for (let idx = 0; idx < n; idx++) {
+            const item = items[idx];
+            const j = idx * 3;
+            positions[j] = item.x;
+            positions[j + 1] = item.y;
+            positions[j + 2] = item.z || 0;
+            rhos[idx] = item.rho !== undefined ? item.rho : 1;
+        }
+    }
+
+    const h = 0.5 * size;
+    const cubeVertices = new Float32Array([
+         h,  h,  h,   h,  h, -h,   h, -h,  h,   h, -h, -h,
+        -h,  h, -h,  -h,  h,  h,  -h, -h, -h,  -h, -h,  h
+    ]);
+    const cubeIndices = new Uint16Array([
+        0, 2, 1,  2, 3, 1,  4, 6, 5,  6, 7, 5,
+        4, 5, 1,  5, 0, 1,  7, 6, 2,  6, 3, 2,
+        5, 7, 0,  7, 2, 0,  1, 3, 4,  3, 6, 4
+    ]);
+
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.setIndex(new THREE.BufferAttribute(cubeIndices, 1));
+    geometry.setAttribute('position', new THREE.BufferAttribute(cubeVertices, 3));
+    geometry.setAttribute('instancePos', new THREE.InstancedBufferAttribute(positions, 3));
+    geometry.setAttribute('instanceRho', new THREE.InstancedBufferAttribute(rhos, 1));
+    geometry.instanceCount = rhos.length;
+
+    const material = new THREE.ShaderMaterial({
+        uniforms: {
+            invDenom: { value: 0.0 }
+        },
+        vertexShader: [
+            'attribute vec3 instancePos;',
+            'attribute float instanceRho;',
+            'uniform float invDenom;',
+            'varying float vGray;',
+            'void main() {',
+            '    float q = floor(instanceRho * invDenom + 0.5);',
+            '    if (q <= 0.0) {',
+            '        vGray = 0.0;',
+            '        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);',
+            '        return;',
+            '    }',
+            '    vGray = min(q, 255.0) * (1.0 / 255.0);',
+            '    gl_Position = projectionMatrix * modelViewMatrix * vec4(position + instancePos, 1.0);',
+            '}'
+        ].join('\n'),
+        fragmentShader: [
+            'varying float vGray;',
+            'void main() {',
+            '    gl_FragColor = vec4(vGray, vGray, vGray, 1.0);',
+            '}'
+        ].join('\n'),
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false
     });
-    const instancedMesh = new THREE.InstancedMesh(geometry, material, items.length);
-    const dummy = new THREE.Object3D();
-    const color = new THREE.Color();
 
-    for (let idx = 0; idx < items.length; idx++) {
-        const item = items[idx];
-        const s = item.size !== undefined ? item.size : 1;
-        dummy.scale.set(s, s, s);
-        dummy.position.set(item.x, item.y, item.z || 0);
-        dummy.updateMatrix();
-        instancedMesh.setMatrixAt(idx, dummy.matrix);
-        color.set(item.color || '#ffffff');
-        instancedMesh.setColorAt(idx, color);
-    }
-    instancedMesh.instanceMatrix.needsUpdate = true;
-    if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
-    scene.add(instancedMesh);
-    return instancedMesh;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    return mesh;
 }
 
-// Update instance colors of an existing InstancedMesh in place
-function recolor_instanced_mesh(instancedMesh, items) {
-    if (!instancedMesh || !items) return;
-    const color = new THREE.Color();
-    for (let idx = 0; idx < items.length; idx++) {
-        color.set(items[idx].color || '#000000');
-        instancedMesh.setColorAt(idx, color);
+// Update the density normalization scale of an existing instanced cube mesh in O(log N) via its shader uniform
+// and binary-searched geometry.instanceCount prefix (skipping GPU execution on all q <= 0 cubes).
+function recolor_instanced_mesh(mesh, items, denom) {
+    if (!mesh) return;
+    if (mesh.material && mesh.material.uniforms && mesh.material.uniforms.invDenom !== undefined) {
+        const hasValidDenom = denom !== undefined && denom > 0;
+        mesh.material.uniforms.invDenom.value = hasValidDenom ? (255 / denom) : 0;
+        if (mesh.geometry && items && items.sorted && items.rhos instanceof Float32Array) {
+            const rhos = items.rhos;
+            const n = rhos.length;
+            let activeCount = 0;
+            if (hasValidDenom && n > 0) {
+                const threshold = denom / 510;
+                if (rhos[n - 1] >= threshold) {
+                    activeCount = n;
+                } else if (rhos[0] >= threshold) {
+                    let lo = 0, hi = n;
+                    while (lo < hi) {
+                        const mid = (lo + hi) >>> 1;
+                        if (rhos[mid] >= threshold) {
+                            lo = mid + 1;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    activeCount = lo;
+                }
+            }
+            if (mesh.geometry.isInstancedBufferGeometry) {
+                mesh.geometry.instanceCount = activeCount;
+            } else {
+                mesh.geometry.setDrawRange(0, activeCount);
+            }
+        }
+        return;
     }
-    if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
-}
-
-function getrandompointinsphere(R) {
-    var x, y, z, r;
-    do {
-        x = Math.random() * 2 - 1;
-        y = Math.random() * 2 - 1;
-        z = Math.random() * 2 - 1;
-        r = Math.sqrt(x * x + y * y + z * z);
-    } while (r > 1);
-
-    return new p(x * R, y * R, z * R);
-}
-
-// from https://stackoverflow.com/questions/9600801/evenly-distributing-n-points-on-a-sphere
-function getapproxequidistantpointsonsphere(n, R) {
-    var out = [];
-
-    var phiradians = Math.PI * (Math.sqrt(5) - 1); // golden angle in radians
-    var y;
-    var flatradius;
-    var theta;
-    for (var i = 0; i < n; i++) {
-        y = 1 - 2 * i / (n - 1); // y goes from 1 to -1
-        flatradius = Math.sqrt(1 - y * y); // horizontal radius at y. the radius swinging around yaxis.
-        theta = phiradians * i; // golden angle increment
-
-        out.push(new p(Math.cos(theta) * flatradius * R, y * R, Math.sin(theta) * flatradius * R));
+    if (!mesh.geometry || !items) return;
+    const colorAttr = mesh.geometry.getAttribute('color');
+    if (!colorAttr) return;
+    const colors = colorAttr.array;
+    const n = items.length;
+    const invDenom = (denom !== undefined && denom > 0) ? (255 / denom) : 0;
+    for (let idx = 0; idx < n; idx++) {
+        const rho = items.rhos ? items.rhos[idx] : items[idx].rho;
+        const q = Math.round(rho * invDenom);
+        const g = q > 0 ? (q >= 255 ? 1 : q / 255) : 0;
+        const j = idx * 3;
+        colors[j] = g;
+        colors[j + 1] = g;
+        colors[j + 2] = g;
     }
-    return out;
-}
-
-function getpointsoncircle(n, R = 1) {
-    var arr = [];
-    for (var i = 0; i < n; i++) {
-        var angle = (i / n) * (2 * Math.PI);
-        arr.push(new p(Math.cos(angle) * R, Math.sin(angle) * R, 0));
-    }
-    return arr;
+    colorAttr.needsUpdate = true;
 }

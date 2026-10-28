@@ -4,6 +4,12 @@ var color_blg = '#22c55e'; // Green (Bulge)
 var color_gas = '#3b82f6'; // Blue  (Gas)
 var color_all = '#ffffff'; // White (All = Disk + Bulge + Gas)
 
+var HUD_COMP_CFG = {
+    dsk: { color: color_dsk, sbKey: 'sb_dsk', sbMaxKey: 'sb_dsk_max', sbLabel: 'observed sb_dsk', acKey: 'a_classic_dsk', asKey: 'a_classic_dsk_sim' },
+    blg: { color: color_blg, sbKey: 'sb_blg', sbMaxKey: 'sb_blg_max', sbLabel: 'observed sb_blg', acKey: 'a_classic_blg', asKey: 'a_classic_blg_sim' },
+    gas: { color: color_gas, sbKey: 'sb_gas', sbMaxKey: 'sb_gas_peak', sbLabel: 'reconstructed sb_gas', acKey: 'a_classic_gas', asKey: 'a_classic_gas_sim' }
+};
+
 // Active HUD & 3D component mode: 'all' | 'dsk' | 'blg' | 'gas'
 var hud_mode = 'all';
 
@@ -25,9 +31,15 @@ function set_hud_mode(mode, galaxyobj) {
     }
 
     if (typeof document !== 'undefined') {
+        var hasBlg = Boolean(galaxyobj && galaxyobj.has_blg);
         var btns = document.querySelectorAll('.hud-mode-btn');
         for (var i = 0; i < btns.length; i++) {
-            btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === hud_mode);
+            var btnMode = btns[i].getAttribute('data-mode');
+            btns[i].classList.toggle('active', btnMode === hud_mode);
+            if (btnMode === 'blg') {
+                btns[i].textContent = hasBlg ? 'Bulge' : 'Bulge (none)';
+                btns[i].classList.toggle('no-bulge', !hasBlg);
+            }
         }
     }
 
@@ -62,137 +74,56 @@ function set_density_scale(mode, galaxyobj) {
     var rho_blg_peak = galaxyobj.has_blg ? (galaxyobj.rho_blg_peak || 0) : 0;
     var rho_gas_peak = galaxyobj.rho_gas_peak || 0;
 
-    var rho_common_peak = galaxyobj.rho_common_peak || 0;
-    if (!rho_common_peak) {
-        rho_common_peak = Math.max(rho_dsk_peak, rho_blg_peak, rho_gas_peak);
-        var colSums = {};
-        var lists = [galaxyobj.voxels_dsk_viz, galaxyobj.voxels_blg_viz, galaxyobj.voxels_gas_viz];
-        for (var li = 0; li < lists.length; li++) {
-            var arr = lists[li];
-            if (!arr) continue;
-            for (var vi = 0; vi < arr.length; vi++) {
-                var vox = arr[vi];
-                var key = vox.x + ',' + vox.y;
-                var s = (colSums[key] || 0) + vox.rho;
-                colSums[key] = s;
-                if (s > rho_common_peak) rho_common_peak = s;
-            }
-        }
-        galaxyobj.rho_common_peak = rho_common_peak;
-    }
-
-    function recolorVoxels(voxels, mesh, denom) {
-        if (!voxels) return;
-        for (var i = 0; i < voxels.length; i++) {
-            var vox = voxels[i];
-            // var dither = (((vox.x * 73856093) ^ (vox.y * 19349663)) & 0xffff) / 65536 - 0.5;
-            var val = denom > 0 ? Math.min(1, vox.rho / denom) : 0;
-            var q = Math.min(255, Math.max(0, Math.round(val * 255)));
-            vox.color = q > 0 ? floattohexgray(q / 255) : '#000000';
-        }
-        if (typeof recolor_instanced_mesh === 'function' && mesh) {
-            recolor_instanced_mesh(mesh, voxels);
-        }
-    }
+    var rho_common_peak = Math.max(galaxyobj.rho_common_peak || 0, rho_dsk_peak, rho_blg_peak, rho_gas_peak);
+    galaxyobj.rho_common_peak = rho_common_peak;
 
     var isCommon = density_scale_mode === 'common';
-    recolorVoxels(galaxyobj.voxels_dsk_viz, galaxyobj.mesh_dsk, isCommon ? rho_common_peak : rho_dsk_peak);
-    recolorVoxels(galaxyobj.voxels_blg_viz, galaxyobj.mesh_blg, isCommon ? rho_common_peak : rho_blg_peak);
-    recolorVoxels(galaxyobj.voxels_gas_viz, galaxyobj.mesh_gas, isCommon ? rho_common_peak : rho_gas_peak);
-
-    if (typeof document !== 'undefined') {
-        var infoEl = document.getElementById('rho-scale-info');
-        if (infoEl) {
-            if (isCommon) {
-                infoEl.textContent = '\u03c1_col_peak (common): ' + rho_common_peak.toExponential(2) + ' kg/m\u00b3' +
-                    '  [dsk: ' + rho_dsk_peak.toExponential(2) +
-                    ', blg: ' + rho_blg_peak.toExponential(2) +
-                    ', gas: ' + rho_gas_peak.toExponential(2) + ']';
-            } else {
-                infoEl.textContent = '\u03c1_col_peak (separate): dsk=' + rho_dsk_peak.toExponential(2) +
-                    ', blg=' + rho_blg_peak.toExponential(2) +
-                    ', gas=' + rho_gas_peak.toExponential(2) + ' kg/m\u00b3';
-            }
-        }
+    if (typeof recolor_instanced_mesh === 'function') {
+        recolor_instanced_mesh(galaxyobj.mesh_dsk, galaxyobj.voxels_dsk_viz, isCommon ? rho_common_peak : rho_dsk_peak);
+        recolor_instanced_mesh(galaxyobj.mesh_blg, galaxyobj.voxels_blg_viz, isCommon ? rho_common_peak : rho_blg_peak);
+        recolor_instanced_mesh(galaxyobj.mesh_gas, galaxyobj.voxels_gas_viz, isCommon ? rho_common_peak : rho_gas_peak);
     }
 }
 
-// ─── Surface-Brightness HUD ──────────────────────────────────────────────────
-// Draws a linear-y chart of observed surface brightness points and the model fit.
-// galaxyobj : the galaxy object (has_blg, rmax, sb_dsk_max, sb_blg_max, radiusdata)
-// mode      : 'all' | 'dsk' | 'blg' | 'gas' (or legacy 'sb_dsk' | 'sb_blg')
-function draw_sb_hud(galaxyobj, mode) {
-    var canvas = document.getElementById('sb-hud');
-    if (!canvas || !galaxyobj) return;
+function setup_hud_canvas(canvas, cssW, cssH) {
+    var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    var targetW = Math.round(cssW * dpr);
+    var targetH = Math.round(cssH * dpr);
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+    }
     var ctx = canvas.getContext('2d');
-    var W = canvas.width;
-    var H = canvas.height;
-    var m = normalize_hud_mode(mode);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx: ctx, W: cssW, H: cssH };
+}
 
-    var ml = 58, mr = 14, mt = 18, mb = 36;
-    var pw = W - ml - mr;
-    var ph = H - mt - mb;
+function draw_hud_axes(canvas, rplot, yBot, ySpan, yTickSpan, xLabel, yLabel, yLabelX) {
+    var setup = setup_hud_canvas(canvas, 340, 220);
+    var ctx = setup.ctx, W = setup.W, H = setup.H;
+    var ml = 66, mr = 19, mt = 18, mb = 40;
+    var pw = W - ml - mr, ph = H - mt - mb;
 
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(10,10,18,0.88)';
     ctx.fillRect(0, 0, W, H);
 
-    var radiusdata = galaxyobj.radiusdata;
-    var rmax = galaxyobj.rmax;
-    var rplot = rmax;
-    var hasBlg = Boolean(galaxyobj.has_blg && typeof interpolate_sb_blg === 'function');
-
-    var showAll = (m === 'all');
-    var showDsk = (m === 'dsk');
-    var showBlg = (m === 'blg');
-    var showGas = (m === 'gas');
-
-    var sbmax = 0;
-    if (showAll) {
-        if (typeof interpolate_sb_dsk === 'function') {
-            sbmax = Math.max(
-                sbmax,
-                (interpolate_sb_dsk(0, galaxyobj) || 0) +
-                (hasBlg ? (interpolate_sb_blg(0, galaxyobj) || 0) : 0) +
-                (interpolate_sb_gas(0, galaxyobj) || 0)
-            );
-        }
-        for (var k = 0; k < radiusdata.length; k++) {
-            var sb_tot = radiusdata[k]['sb_tot'] !== undefined
-                ? radiusdata[k]['sb_tot']
-                : ((radiusdata[k]['sb_dsk'] || 0) +
-                    (hasBlg ? (radiusdata[k]['sb_blg'] || 0) : 0) +
-                    (radiusdata[k]['sb_gas'] || 0));
-            if (sb_tot > sbmax) sbmax = sb_tot;
-        }
-    } else if (showDsk && typeof interpolate_sb_dsk === 'function') {
-        sbmax = Math.max(sbmax, galaxyobj.sb_dsk_max || 0, interpolate_sb_dsk(0, galaxyobj) || 0);
-    } else if (showBlg && hasBlg) {
-        sbmax = Math.max(sbmax, galaxyobj.sb_blg_max || 0, interpolate_sb_blg(0, galaxyobj) || 0);
-    } else if (showGas && typeof interpolate_sb_gas === 'function') {
-        sbmax = Math.max(sbmax, galaxyobj.sb_gas_peak || 0, galaxyobj.sb_gas_max || 0, interpolate_sb_gas(0, galaxyobj) || 0);
-    }
-    if (sbmax <= 0) sbmax = 1e-6;
-    var ymax = sbmax * 1.05;
-
     function xpx(r) { return ml + (r / rplot) * pw; }
-    function ypx(sb) { return mt + ph - (Math.max(0, sb) / ymax) * ph; }
+    function ypx(v) { return mt + ph - ((v - yBot) / ySpan) * ph; }
 
-    // Y-axis grid lines & ticks (linear, 5 ticks)
     var nyticks = 5;
     for (var ti = 0; ti <= nyticks; ti++) {
-        var sbv = (ti / nyticks) * sbmax;
-        var yg = ypx(sbv);
+        var yv = yBot + (ti / nyticks) * yTickSpan;
+        var yg = ypx(yv);
         ctx.strokeStyle = 'rgba(255,255,255,0.08)';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(ml, yg); ctx.lineTo(ml + pw, yg); ctx.stroke();
         ctx.fillStyle = 'rgba(255,255,255,0.55)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText(sbv.toExponential(1), ml - 4, yg + 3);
+        ctx.fillText(yv.toExponential(1), ml - 5, yg + 3);
     }
 
-    // X-axis ticks: 5 marks across rplot
     for (var frac = 0; frac <= 1; frac += 0.25) {
         var xg = xpx(frac * rplot);
         ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -201,24 +132,108 @@ function draw_sb_hud(galaxyobj, mode) {
         ctx.fillStyle = 'rgba(255,255,255,0.55)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText((frac * rplot).toExponential(1), xg, mt + ph + 14);
+        ctx.fillText((frac * rplot).toExponential(1), xg, mt + ph + 13);
     }
 
-    // Axes border
-    ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
-    ctx.strokeRect(ml, mt, pw, ph);
+    ctx.strokeRect(ml + 0.5, mt + 0.5, pw - 1, ph - 1);
 
-    // Axis labels
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.font = '10px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('r  (m)', ml + pw / 2, H - 4);
+    ctx.fillText(xLabel, ml + pw / 2, H - 9);
     ctx.save();
-    ctx.translate(10, mt + ph / 2);
+    ctx.translate(yLabelX, mt + ph / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText('SB  (W/m\u00b2)', 0, 0);
+    ctx.fillText(yLabel, 0, 0);
     ctx.restore();
+
+    return { ctx: ctx, ml: ml, mt: mt, pw: pw, ph: ph, xpx: xpx, ypx: ypx };
+}
+
+function draw_hud_legend(ctx, ml, mt, pw, boxW, legendItems, showLineDot) {
+    var boxH = 8 + legendItems.length * 14;
+    var bx = ml + pw - boxW - 8;
+    var by = mt + 8;
+    ctx.fillStyle = 'rgba(10,10,18,0.85)';
+    ctx.fillRect(bx, by, boxW, boxH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, by + 0.5, boxW, boxH);
+
+    ctx.textAlign = 'left';
+    var tx = bx + 28;
+    for (var li = 0; li < legendItems.length; li++) {
+        var item = legendItems[li];
+        var iy = by + 11 + li * 14;
+        if (item.type === 'dot') {
+            ctx.beginPath(); ctx.arc(bx + 14, iy, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = item.color; ctx.fill();
+        } else {
+            ctx.save();
+            ctx.strokeStyle = item.color;
+            ctx.lineWidth = showLineDot ? 2 : 1.8;
+            ctx.setLineDash(item.dashed ? (showLineDot ? [4, 3] : [4, 4]) : []);
+            ctx.beginPath(); ctx.moveTo(bx + 6, iy); ctx.lineTo(bx + 22, iy); ctx.stroke();
+            if (showLineDot && !item.dashed) {
+                ctx.beginPath(); ctx.arc(bx + 14, iy, 2, 0, 2 * Math.PI);
+                ctx.fillStyle = item.color; ctx.fill();
+            }
+            ctx.restore();
+        }
+        ctx.fillStyle = item.color;
+        ctx.font = '9px monospace';
+        ctx.fillText(item.label, tx, iy + 3);
+    }
+}
+
+// ─── Surface-Brightness HUD ──────────────────────────────────────────────────
+// Draws a linear-y chart of observed surface brightness points and the model fit.
+// galaxyobj : the galaxy object (has_blg, rmax, sb_dsk_max, sb_blg_max, radiusdata)
+// mode      : 'all' | 'dsk' | 'blg' | 'gas' (or legacy 'sb_dsk' | 'sb_blg')
+function draw_sb_hud(galaxyobj, mode) {
+    if (typeof document === 'undefined') return;
+    var canvas = document.getElementById('sb-hud');
+    if (!canvas || !galaxyobj) return;
+    var m = normalize_hud_mode(mode);
+
+    var radiusdata = galaxyobj.radiusdata;
+    var rmax = galaxyobj.rmax;
+    var rplot = rmax;
+    var hasBlg = Boolean(galaxyobj.has_blg && typeof interpolate_sb_blg === 'function');
+    var comp = HUD_COMP_CFG[m];
+    var interpFn = m === 'dsk' ? (typeof interpolate_sb_dsk === 'function' ? interpolate_sb_dsk : null)
+        : (m === 'blg' ? (hasBlg ? interpolate_sb_blg : null)
+        : (m === 'gas' && typeof interpolate_sb_gas === 'function' ? interpolate_sb_gas : null));
+
+    function evalTotSb(r2, g) {
+        return (interpolate_sb_dsk(r2, g) || 0) +
+            (hasBlg ? (interpolate_sb_blg(r2, g) || 0) : 0) +
+            (interpolate_sb_gas(r2, g) || 0);
+    }
+    function getObsTotSb(d) {
+        return d['sb_tot'] !== undefined
+            ? d['sb_tot']
+            : ((d['sb_dsk'] || 0) + (hasBlg ? (d['sb_blg'] || 0) : 0) + (d['sb_gas'] || 0));
+    }
+
+    var sbmax = 0;
+    if (m === 'all') {
+        if (typeof interpolate_sb_dsk === 'function') sbmax = Math.max(sbmax, evalTotSb(0, galaxyobj));
+        for (var k = 0; k < radiusdata.length; k++) {
+            var sb_tot = getObsTotSb(radiusdata[k]);
+            if (sb_tot > sbmax) sbmax = sb_tot;
+        }
+    } else if (comp && interpFn) {
+        sbmax = Math.max(sbmax, galaxyobj[comp.sbMaxKey] || 0, galaxyobj[comp.sbKey + '_max'] || 0, interpFn(0, galaxyobj) || 0);
+    }
+    if (sbmax <= 0) sbmax = 1e-6;
+    var ymax = sbmax * 1.05;
+
+    var frame = draw_hud_axes(canvas, rplot, 0, ymax, sbmax, 'r  (m)', 'SB (W/m\u00b2)', 17);
+    var ctx = frame.ctx, ml = frame.ml, mt = frame.mt, pw = frame.pw, ph = frame.ph;
+    var xpx = frame.xpx, ypx = frame.ypx;
 
     var r_first = radiusdata[0]['r'];
     var r_last = rmax;
@@ -248,48 +263,29 @@ function draw_sb_hud(galaxyobj, mode) {
         ctx.restore();
     }
 
-    function drawSbComponent(key, interpFn, lineColor, dotColor) {
+    function drawSbDots(getValFn, dotColor) {
         for (var k = 0; k < radiusdata.length; k++) {
-            var sb_obs = radiusdata[k][key];
+            var sb_obs = getValFn(radiusdata[k]);
             if (sb_obs < 0 || isNaN(sb_obs) || sb_obs === undefined) continue;
-            var rx = xpx(radiusdata[k]['r']);
-            var ry = ypx(sb_obs);
             ctx.beginPath();
-            ctx.arc(rx, ry, 3.2, 0, 2 * Math.PI);
+            ctx.arc(xpx(radiusdata[k]['r']), ypx(sb_obs), 3.2, 0, 2 * Math.PI);
             ctx.fillStyle = dotColor;
             ctx.fill();
         }
-
-        drawSbCurveSegment(0, r_first, interpFn, lineColor, true);
-        drawSbCurveSegment(r_first, r_last, interpFn, lineColor, false);
     }
 
-    if (showAll && typeof interpolate_sb_dsk === 'function') {
-        for (var k = 0; k < radiusdata.length; k++) {
-            var sb_tot_obs = radiusdata[k]['sb_tot'] !== undefined
-                ? radiusdata[k]['sb_tot']
-                : ((radiusdata[k]['sb_dsk'] || 0) +
-                    (hasBlg ? (radiusdata[k]['sb_blg'] || 0) : 0) +
-                    (radiusdata[k]['sb_gas'] || 0));
-            if (sb_tot_obs < 0 || isNaN(sb_tot_obs)) continue;
-            var rx = xpx(radiusdata[k]['r']);
-            var ry = ypx(sb_tot_obs);
-            ctx.beginPath();
-            ctx.arc(rx, ry, 3.2, 0, 2 * Math.PI);
-            ctx.fillStyle = color_all;
-            ctx.fill();
-        }
-        drawSbCurveSegment(0, r_last, function (r2, g) {
-            return (interpolate_sb_dsk(r2, g) || 0) +
-                (hasBlg ? (interpolate_sb_blg(r2, g) || 0) : 0) +
-                (interpolate_sb_gas(r2, g) || 0);
-        }, color_all, true);
-    } else if (showDsk && typeof interpolate_sb_dsk === 'function') {
-        drawSbComponent('sb_dsk', interpolate_sb_dsk, color_dsk, '#ffffff');
-    } else if (showBlg) {
-        if (hasBlg) {
-            drawSbComponent('sb_blg', interpolate_sb_blg, color_blg, '#ffffff');
-        } else {
+    var legendItems = [];
+    if (m === 'all' && typeof interpolate_sb_dsk === 'function') {
+        drawSbDots(getObsTotSb, color_all);
+        drawSbCurveSegment(0, r_last, evalTotSb, color_all, true);
+        legendItems.push({ type: 'dot', color: color_all, label: 'observed sb_tot' });
+        legendItems.push({ type: 'line', color: color_all, dashed: true, label: 'sim sb_tot' });
+    } else if (comp) {
+        if (interpFn) {
+            drawSbDots(function (d) { return d[comp.sbKey]; }, '#ffffff');
+            drawSbCurveSegment(0, r_first, interpFn, comp.color, true);
+            drawSbCurveSegment(r_first, r_last, interpFn, comp.color, false);
+        } else if (m === 'blg') {
             var y0 = ypx(0);
             ctx.save();
             ctx.strokeStyle = color_blg;
@@ -297,278 +293,100 @@ function draw_sb_hud(galaxyobj, mode) {
             ctx.beginPath(); ctx.moveTo(ml, y0); ctx.lineTo(ml + pw, y0); ctx.stroke();
             ctx.restore();
         }
-    } else if (showGas && typeof interpolate_sb_gas === 'function') {
-        drawSbComponent('sb_gas', interpolate_sb_gas, color_gas, '#ffffff');
+        legendItems.push({ type: 'dot', color: '#ffffff', label: (m === 'blg' && !hasBlg) ? 'sb_blg (no bulge)' : comp.sbLabel });
+        legendItems.push({ type: 'line', color: comp.color, dashed: false, label: 'interpolation' });
+        legendItems.push({ type: 'line', color: comp.color, dashed: true, label: 'extrapolation' });
     }
 
-    // Legend (top-right)
-    var legendItems = [];
-    if (showAll) {
-        legendItems.push({ type: 'dot', color: color_all, label: 'observed sb_tot' });
-        legendItems.push({ type: 'line', color: color_all, dashed: true, label: 'sim sb_tot' });
-    } else if (showDsk) {
-        legendItems.push({ type: 'dot', color: '#ffffff', label: 'observed sb_dsk' });
-        legendItems.push({ type: 'line', color: color_dsk, dashed: false, label: 'interpolation' });
-        legendItems.push({ type: 'line', color: color_dsk, dashed: true, label: 'extrapolation' });
-    } else if (showBlg) {
-        legendItems.push({ type: 'dot', color: '#ffffff', label: hasBlg ? 'observed sb_blg' : 'sb_blg (no bulge)' });
-        legendItems.push({ type: 'line', color: color_blg, dashed: false, label: 'interpolation' });
-        legendItems.push({ type: 'line', color: color_blg, dashed: true, label: 'extrapolation' });
-    } else if (showGas) {
-        legendItems.push({ type: 'dot', color: '#ffffff', label: 'reconstructed sb_gas' });
-        legendItems.push({ type: 'line', color: color_gas, dashed: false, label: 'interpolation' });
-        legendItems.push({ type: 'line', color: color_gas, dashed: true, label: 'extrapolation' });
-    }
-
-    var boxW = 152;
-    var boxH = 8 + legendItems.length * 14;
-    var bx = ml + pw - boxW - 8;
-    var by = mt + 8;
-    ctx.fillStyle = 'rgba(10,10,18,0.82)';
-    ctx.fillRect(bx, by, boxW, boxH);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bx, by, boxW, boxH);
-
-    ctx.textAlign = 'left';
-    var tx = bx + 28;
-    for (var li = 0; li < legendItems.length; li++) {
-        var item = legendItems[li];
-        var iy = by + 11 + li * 14;
-        if (item.type === 'dot') {
-            ctx.beginPath(); ctx.arc(bx + 14, iy, 3, 0, 2 * Math.PI);
-            ctx.fillStyle = item.color; ctx.fill();
-        } else {
-            ctx.save();
-            ctx.strokeStyle = item.color;
-            ctx.lineWidth = 1.8;
-            ctx.setLineDash(item.dashed ? [4, 4] : []);
-            ctx.beginPath(); ctx.moveTo(bx + 6, iy); ctx.lineTo(bx + 22, iy); ctx.stroke();
-            ctx.restore();
-        }
-        ctx.fillStyle = item.color;
-        ctx.font = '9px monospace';
-        ctx.fillText(item.label, tx, iy + 3);
-    }
+    draw_hud_legend(ctx, ml, mt, pw, 152, legendItems, false);
 }
 
 // ─── Acceleration HUD ─────────────────────────────────────────────────────────
 // Draws a chart comparing claimed SPARC accelerations and 3D Voxel Simulation
 // accelerations according to the selected mode ('all' | 'dsk' | 'blg' | 'gas').
 function draw_accel_hud(galaxyobj, mode) {
+    if (typeof document === 'undefined') return;
     var canvas = document.getElementById('accel-hud');
     if (!canvas || !galaxyobj) return;
-    var ctx = canvas.getContext('2d');
-    var W = canvas.width;
-    var H = canvas.height;
     var m = normalize_hud_mode(mode);
 
-    var ml = 58, mr = 14, mt = 18, mb = 36;
-    var pw = W - ml - mr;
-    var ph = H - mt - mb;
-
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(10,10,18,0.88)';
-    ctx.fillRect(0, 0, W, H);
-
     var radiusdata = galaxyobj.radiusdata;
-    var rmax = galaxyobj.rmax;
-    var rplot = rmax;
+    var rplot = galaxyobj.rmax;
     var hasBlg = Boolean(galaxyobj.has_blg && radiusdata.length > 0 && radiusdata[0]['a_classic_blg_sim'] !== undefined);
+    var comp = HUD_COMP_CFG[m];
 
-    // Collect min/max acceleration across active series
-    var a_max = 1e-13;
-    var a_min = 0;
-    for (var k = 0; k < radiusdata.length; k++) {
+    var n = radiusdata.length;
+    var claimedArr = new Array(n);
+    var simArr = new Array(n);
+    var a_max = 1e-13, a_min = 0;
+
+    for (var k = 0; k < n; k++) {
         var d = radiusdata[k];
-        var ac_dsk = d['a_classic_dsk'] || 0;
-        var as_dsk = d['a_classic_dsk_sim'] || 0;
-        var ac_blg = hasBlg ? (d['a_classic_blg'] || 0) : 0;
-        var as_blg = hasBlg ? (d['a_classic_blg_sim'] || 0) : 0;
-        var ac_gas = d['a_classic_gas'] || 0;
-        var as_gas = d['a_classic_gas_sim'] || 0;
-
+        var ac, asim;
         if (m === 'all') {
-            var ac_tot = d['a_classic_tot'] !== undefined ? d['a_classic_tot'] : (ac_dsk + ac_blg + ac_gas);
-            var as_tot = d['a_classic_tot_sim'] !== undefined ? d['a_classic_tot_sim'] : (as_dsk + as_blg + as_gas);
-            if (ac_tot > a_max) a_max = ac_tot;
-            if (as_tot > a_max) a_max = as_tot;
-            if (ac_tot < a_min) a_min = ac_tot;
-            if (as_tot < a_min) a_min = as_tot;
-        } else if (m === 'dsk') {
-            if (ac_dsk > a_max) a_max = ac_dsk;
-            if (as_dsk > a_max) a_max = as_dsk;
-            if (ac_dsk < a_min) a_min = ac_dsk;
-            if (as_dsk < a_min) a_min = as_dsk;
-        } else if (m === 'blg') {
-            if (ac_blg > a_max) a_max = ac_blg;
-            if (as_blg > a_max) a_max = as_blg;
-            if (ac_blg < a_min) a_min = ac_blg;
-            if (as_blg < a_min) a_min = as_blg;
-        } else if (m === 'gas') {
-            if (ac_gas > a_max) a_max = ac_gas;
-            if (as_gas > a_max) a_max = as_gas;
-            if (ac_gas < a_min) a_min = ac_gas;
-            if (as_gas < a_min) a_min = as_gas;
+            ac = d['a_classic_tot'] !== undefined ? d['a_classic_tot']
+                : ((d['a_classic_dsk'] || 0) + (hasBlg ? (d['a_classic_blg'] || 0) : 0) + (d['a_classic_gas'] || 0));
+            asim = d['a_classic_tot_sim'] !== undefined ? d['a_classic_tot_sim']
+                : ((d['a_classic_dsk_sim'] || 0) + (hasBlg ? (d['a_classic_blg_sim'] || 0) : 0) + (d['a_classic_gas_sim'] || 0));
+        } else {
+            var active = (m !== 'blg' || hasBlg) && comp;
+            ac = active ? (d[comp.acKey] || 0) : 0;
+            asim = active ? (d[comp.asKey] || 0) : 0;
         }
+        claimedArr[k] = ac;
+        simArr[k] = asim;
+        if (ac > a_max) a_max = ac;
+        if (asim > a_max) a_max = asim;
+        if (ac < a_min) a_min = ac;
+        if (asim < a_min) a_min = asim;
     }
+
     var yTop = a_max * 1.1;
     var yBot = a_min < 0 ? a_min * 1.15 : 0;
     var ySpan = (yTop - yBot) || 1e-12;
 
-    function xpx(r) { return ml + (r / rplot) * pw; }
-    function ypx(a) { return mt + ph - ((a - yBot) / ySpan) * ph; }
+    var frame = draw_hud_axes(canvas, rplot, yBot, ySpan, ySpan, 'r (m)', 'a (m/s\u00b2)', 15);
+    var ctx = frame.ctx, ml = frame.ml, mt = frame.mt, pw = frame.pw, ph = frame.ph;
+    var xpx = frame.xpx, ypx = frame.ypx;
 
-    // Y-axis grid lines & ticks (5 ticks)
-    var nyticks = 5;
-    for (var ti = 0; ti <= nyticks; ti++) {
-        var av = yBot + (ti / nyticks) * ySpan;
-        var yg = ypx(av);
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(ml, yg); ctx.lineTo(ml + pw, yg); ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'right';
-        ctx.fillText(av.toExponential(1), ml - 4, yg + 3);
-    }
+    var isAll = (m === 'all');
+    var simColor = isAll ? color_all : comp.color;
+    var dotColor = isAll ? color_all : '#ffffff';
+    var dashed = isAll;
 
-    // X-axis ticks (5 marks)
-    for (var frac = 0; frac <= 1; frac += 0.25) {
-        var xg = xpx(frac * rplot);
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(xg, mt); ctx.lineTo(xg, mt + ph); ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText((frac * rplot).toExponential(1), xg, mt + ph + 14);
-    }
-
-    // Axes border
-    ctx.strokeStyle = 'rgba(255,255,255,0.30)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(ml, mt, pw, ph);
-
-    // Axis labels
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('r  (m)', ml + pw / 2, H - 4);
     ctx.save();
-    ctx.translate(10, mt + ph / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText('a  (m/s\u00b2)', 0, 0);
+    ctx.beginPath();
+    ctx.rect(ml, mt, pw, ph);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.strokeStyle = simColor;
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash(dashed ? [5, 4] : []);
+    for (var k = 0; k < n; k++) {
+        var cx = xpx(radiusdata[k]['r']), cy = ypx(simArr[k]);
+        if (k === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+    if (!dashed) {
+        for (var k = 0; k < n; k++) {
+            ctx.beginPath();
+            ctx.arc(xpx(radiusdata[k]['r']), ypx(simArr[k]), 2.3, 0, 2 * Math.PI);
+            ctx.fillStyle = simColor;
+            ctx.fill();
+        }
+    }
     ctx.restore();
 
-    function drawAccelValues(claimedArr, simArr, simColor, dotColor, dashed) {
-        ctx.save();
+    for (var k = 0; k < n; k++) {
         ctx.beginPath();
-        ctx.rect(ml, mt, pw, ph);
-        ctx.clip();
-        ctx.beginPath();
-        ctx.strokeStyle = simColor;
-        ctx.lineWidth = 1.8;
-        ctx.setLineDash(dashed ? [5, 4] : []);
-        for (var k = 0; k < radiusdata.length; k++) {
-            var a_sim = simArr[k];
-            if (a_sim === undefined || isNaN(a_sim)) continue;
-            var cx = xpx(radiusdata[k]['r']), cy = ypx(a_sim);
-            if (k === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
-        }
-        ctx.stroke();
-        if (!dashed) {
-            for (var k = 0; k < radiusdata.length; k++) {
-                var a_sim = simArr[k];
-                if (a_sim === undefined || isNaN(a_sim)) continue;
-                var cx = xpx(radiusdata[k]['r']), cy = ypx(a_sim);
-                ctx.beginPath();
-                ctx.arc(cx, cy, 2.3, 0, 2 * Math.PI);
-                ctx.fillStyle = simColor;
-                ctx.fill();
-            }
-        }
-        ctx.restore();
-
-        if (claimedArr && dotColor) {
-            for (var k = 0; k < radiusdata.length; k++) {
-                var a_cla = claimedArr[k];
-                if (a_cla === undefined || isNaN(a_cla)) continue;
-                var rx = xpx(radiusdata[k]['r']), ry = ypx(a_cla);
-                ctx.beginPath();
-                ctx.arc(rx, ry, 3.3, 0, 2 * Math.PI);
-                ctx.fillStyle = dotColor;
-                ctx.fill();
-            }
-        }
+        ctx.arc(xpx(radiusdata[k]['r']), ypx(claimedArr[k]), 3.3, 0, 2 * Math.PI);
+        ctx.fillStyle = dotColor;
+        ctx.fill();
     }
 
-    var a_classic_dsk = radiusdata.map(function (d) { return d['a_classic_dsk'] || 0; });
-    var a_classic_dsk_sim = radiusdata.map(function (d) { return d['a_classic_dsk_sim'] || 0; });
-    var a_classic_blg = radiusdata.map(function (d) { return hasBlg ? (d['a_classic_blg'] || 0) : 0; });
-    var a_classic_blg_sim = radiusdata.map(function (d) { return hasBlg ? (d['a_classic_blg_sim'] || 0) : 0; });
-    var a_classic_gas = radiusdata.map(function (d) { return d['a_classic_gas'] || 0; });
-    var a_classic_gas_sim = radiusdata.map(function (d) { return d['a_classic_gas_sim'] || 0; });
-
-    var legendItems = [];
-
-    if (m === 'all') {
-        var a_classic_tot = radiusdata.map(function (d, i) {
-            return d['a_classic_tot'] !== undefined ? d['a_classic_tot'] : (a_classic_dsk[i] + a_classic_blg[i] + a_classic_gas[i]);
-        });
-        var a_classic_tot_sim = radiusdata.map(function (d, i) {
-            return d['a_classic_tot_sim'] !== undefined ? d['a_classic_tot_sim'] : (a_classic_dsk_sim[i] + a_classic_blg_sim[i] + a_classic_gas_sim[i]);
-        });
-        drawAccelValues(a_classic_tot, a_classic_tot_sim, color_all, color_all, true);
-        legendItems.push({ type: 'dot', color: color_all, label: 'a_classic_tot_claimed' });
-        legendItems.push({ type: 'line', color: color_all, dashed: true, label: 'a_classic_tot_sim' });
-    } else if (m === 'dsk') {
-        drawAccelValues(a_classic_dsk, a_classic_dsk_sim, color_dsk, '#ffffff', false);
-        legendItems.push({ type: 'dot', color: '#ffffff', label: 'a_classic_dsk_claimed' });
-        legendItems.push({ type: 'line', color: color_dsk, dashed: false, label: 'a_classic_dsk_sim' });
-    } else if (m === 'blg') {
-        drawAccelValues(a_classic_blg, a_classic_blg_sim, color_blg, '#ffffff', false);
-        legendItems.push({ type: 'dot', color: '#ffffff', label: 'a_classic_blg_claimed' });
-        legendItems.push({ type: 'line', color: color_blg, dashed: false, label: 'a_classic_blg_sim' });
-    } else if (m === 'gas') {
-        drawAccelValues(a_classic_gas, a_classic_gas_sim, color_gas, '#ffffff', false);
-        legendItems.push({ type: 'dot', color: '#ffffff', label: 'a_classic_gas_claimed' });
-        legendItems.push({ type: 'line', color: color_gas, dashed: false, label: 'a_classic_gas_sim' });
-    }
-
-    // Legend (top-right)
-    var boxW = 166;
-    var boxH = 8 + legendItems.length * 14;
-    var bx = ml + pw - boxW - 8;
-    var by = mt + 8;
-    ctx.fillStyle = 'rgba(10,10,18,0.85)';
-    ctx.fillRect(bx, by, boxW, boxH);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bx, by, boxW, boxH);
-
-    ctx.textAlign = 'left';
-    var tx = bx + 28;
-    for (var li = 0; li < legendItems.length; li++) {
-        var item = legendItems[li];
-        var iy = by + 11 + li * 14;
-        if (item.type === 'dot') {
-            ctx.beginPath(); ctx.arc(bx + 14, iy, 3, 0, 2 * Math.PI);
-            ctx.fillStyle = item.color; ctx.fill();
-        } else {
-            ctx.save();
-            ctx.strokeStyle = item.color;
-            ctx.lineWidth = 2;
-            ctx.setLineDash(item.dashed ? [4, 3] : []);
-            ctx.beginPath(); ctx.moveTo(bx + 6, iy); ctx.lineTo(bx + 22, iy); ctx.stroke();
-            if (!item.dashed) {
-                ctx.beginPath(); ctx.arc(bx + 14, iy, 2, 0, 2 * Math.PI);
-                ctx.fillStyle = item.color; ctx.fill();
-            }
-            ctx.restore();
-        }
-        ctx.fillStyle = item.color;
-        ctx.font = '9px monospace';
-        ctx.fillText(item.label, tx, iy + 3);
-    }
+    var legendItems = [
+        { type: 'dot', color: dotColor, label: (isAll ? 'a_classic_tot' : comp.acKey) + '_claimed' },
+        { type: 'line', color: simColor, dashed: dashed, label: isAll ? 'a_classic_tot_sim' : comp.asKey }
+    ];
+    draw_hud_legend(ctx, ml, mt, pw, 166, legendItems, true);
 }

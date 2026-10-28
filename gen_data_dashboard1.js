@@ -6,34 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-for (const file of ['lib.js', 'data_sparcgalaxies.js', 'logic.js', 'logic_dsk.js', 'logic_blg.js', 'logic_gas.js']) {
+for (const file of ['lib.js', 'data_sparcgalaxies.js', 'logic.js', 'logic_dsk.js', 'logic_blg.js', 'logic_gas.js', 'dashboard_common.js']) {
     vm.runInThisContext(fs.readFileSync(path.join(__dirname, file), 'utf8'), { filename: file });
-}
-
-const n4 = x => Number((x || 0).toPrecision(4));
-const n5 = x => Number((x || 0).toPrecision(5));
-const n2 = x => Number((x || 0).toFixed(2));
-const pctDiff = (asim, ac) => ac !== 0 ? n2(((asim - ac) / Math.abs(ac)) * 100) : 0;
-
-function computeCompStats(pts, acKey, pctKey) {
-    let maxAc = 0, sumAbsAll = 0, cntAll = 0;
-    for (const pt of pts) {
-        const a = Math.abs(pt[acKey] || 0);
-        if (a > maxAc) maxAc = a;
-    }
-    for (const pt of pts) {
-        const acVal = Math.abs(pt[acKey] || 0);
-        if (acVal === 0 && pt[pctKey] === 0) continue;
-        // Ignore exact zero-crossing sign-flip points (< 1.5% of peak component accel) in summary mean %
-        if (maxAc > 0 && acVal < 0.015 * maxAc) continue;
-        sumAbsAll += Math.abs(pt[pctKey]);
-        cntAll++;
-    }
-    return {
-        meanAbsAll: n2(cntAll > 0 ? sumAbsAll / cntAll : 0),
-        k0Pct: pts.length ? pts[0][pctKey] : 0,
-        lastPct: pts.length ? pts[pts.length - 1][pctKey] : 0
-    };
 }
 
 const t0 = Date.now();

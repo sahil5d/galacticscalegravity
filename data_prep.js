@@ -4,6 +4,7 @@ const vm = require('vm');
 
 vm.runInThisContext(fs.readFileSync(path.join(__dirname, 'lib.js'), 'utf8'), { filename: 'lib.js' });
 
+// (from SPARC table2.mrt)
 const filePath = path.join(__dirname, 'data_sparcgalaxies.csv');
 const fileContent = fs.readFileSync(filePath, 'utf8');
 // console.log(fileContent);

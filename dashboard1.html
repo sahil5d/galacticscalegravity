@@ -4,287 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard1: a_classic_claimed vs a_classic_sim</title>
-<style>
-  :root {
-    --bg-primary: #050505;
-    --bg-secondary: #151515;
-    --bg-tertiary: #252525;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-tertiary: #64748b;
-    --border-color: #1f2937;
-    --accent-blue: #3b82f6;
-    --accent-amber: #f59e0b;
-    --accent-teal: #14b8a6;
-    --accent-rose: #f43f5e;
-    --accent-purple: #a78bfa;
-    --card-radius: 2px;
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-mono: "SF Mono", "Fira Code", Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 20px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    /* font-family: var(--font-sans); */
-    font-family: var(--font-mono);
-    line-height: 1.45;
-  }
-  .container {
-    max-width: 1380px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-  }
-  .header {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 12px;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 12px;
-  }
-  .header h1 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-  }
-  .header p {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-  .kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 12px;
-  }
-  .kpi-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--card-radius);
-    padding: 14px 16px;
-  }
-  .kpi-label {
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-  .kpi-val {
-    font-size: 24px;
-    font-weight: 700;
-    font-family: var(--font-mono);
-    margin: 4px 0 2px;
-  }
-  .kpi-sub {
-    font-size: 11px;
-    color: var(--text-tertiary);
-    font-family: var(--font-mono);
-  }
-  .controls-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--card-radius);
-    padding: 10px 14px;
-  }
-  .btn-group {
-    display: inline-flex;
-    background: var(--bg-tertiary);
-    border-radius: 2px;
-    padding: 2px;
-    gap: 2px;
-  }
-  .btn {
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    padding: 6px 11px;
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .btn.active {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-  }
-  .search-input {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    padding: 6px 10px;
-    border-radius: 2px;
-    font-size: 12px;
-    font-family: var(--font-mono);
-    min-width: 220px;
-  }
-  .quick-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-left: auto;
-    align-items: center;
-  }
-  .chip {
-    font-size: 11px;
-    font-family: var(--font-mono);
-    padding: 4px 8px;
-    border-radius: 5px;
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    cursor: pointer;
-  }
-  .chip:hover, .chip.active {
-    border-color: var(--accent-amber);
-    color: var(--text-primary);
-  }
-  .card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--card-radius);
-    padding: 16px;
-  }
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .card-title {
-    font-size: 14px;
-    font-weight: 600;
-    margin: 0;
-  }
-  .legend {
-    display: flex;
-    gap: 14px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    align-items: center;
-  }
-  .legend-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
-    margin-right: 5px;
-    vertical-align: middle;
-  }
-  .split-grid {
-    display: grid;
-    grid-template-columns: 1.25fr 1fr;
-    gap: 16px;
-  }
-  @media (max-width: 980px) {
-    .split-grid { grid-template-columns: 1fr; }
-  }
-  canvas {
-    width: 100%;
-    display: block;
-    cursor: pointer;
-  }
-  .table-wrap {
-    max-height: 440px;
-    overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: 2px;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-    font-family: var(--font-mono);
-  }
-  th, td {
-    padding: 7px 10px;
-    text-align: right;
-    border-bottom: 1px solid var(--border-color);
-    white-space: nowrap;
-  }
-  th:first-child, td:first-child,
-  th:nth-child(2), td:nth-child(2) {
-    text-align: left;
-  }
-  th {
-    position: sticky;
-    top: 0;
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    font-weight: 600;
-    cursor: pointer;
-    user-select: none;
-    z-index: 1;
-  }
-  tr.gal-row {
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-  tr.gal-row:hover {
-    background: var(--bg-tertiary);
-  }
-  tr.gal-row.selected {
-    background: rgba(245, 158, 11, 0.18);
-  }
-  .badge {
-    display: inline-block;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
-  }
-  .badge-disk {
-    background: rgba(239, 68, 68, 0.16);
-    color: #f87171;
-  }
-  .badge-bulge {
-    background: rgba(34, 197, 94, 0.18);
-    color: #4ade80;
-  }
-  #comp-group .btn.active[data-comp="all"] {
-    background: rgba(255, 255, 255, 0.16);
-    color: #ffffff;
-    border: 1px solid rgba(255, 255, 255, 0.45);
-  }
-  #comp-group .btn.active[data-comp="dsk"] {
-    background: rgba(239, 68, 68, 0.20);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.50);
-  }
-  #comp-group .btn.active[data-comp="blg"] {
-    background: rgba(34, 197, 94, 0.20);
-    color: #4ade80;
-    border: 1px solid rgba(34, 197, 94, 0.50);
-  }
-  #comp-group .btn.active[data-comp="gas"] {
-    background: rgba(59, 130, 246, 0.20);
-    color: #60a5fa;
-    border: 1px solid rgba(59, 130, 246, 0.50);
-  }
-  .good { color: var(--accent-teal); }
-  .warn { color: var(--accent-amber); }
-  .bad  { color: var(--accent-rose); }
-</style>
+<link rel="stylesheet" href="./dashboard.css">
 </head>
 <body>
 <div class="container">
   <div class="header">
-    <div>
-      <h1 id="main-title"> <code>a_classic</code> (Disk + Bulge + Gas) Claimed vs Sim</h1>
-      <p>Click any bar or row to inspect its radial profile.</p>
+    <div class="header-title-row">
+      <h1 id="main-title"><code>a_classic_tot</code> Claimed vs Sim</h1>
+      <span class="header-sub" id="sub-title">Disk + Bulge + Gas &middot; 175 SPARC Galaxies</span>
     </div>
+    <div class="header-right" id="header-nav-slot"></div>
   </div>
 
   <!-- KPI Summary Row -->
@@ -298,7 +27,7 @@
       <button class="btn" data-comp="blg">Bulge Only</button>
       <button class="btn" data-comp="gas">Gas Only</button>
     </div>
-    <input type="text" class="search-input" id="search-input" placeholder="Search galaxy (e.g. UGC07524, NGC5005)...">
+    <input type="text" class="search-input" id="search-input" placeholder="Search galaxy (NGC5005)">
     <div class="quick-chips">
       <span style="font-size:11px;color:var(--text-tertiary);">Quick inspect:</span>
       <span class="chip" data-gal="UGC07524">UGC07524</span>
@@ -384,15 +113,17 @@
 </div>
 
 <script src="./data_dashboard1.js"></script>
+<script src="./dashboard_common.js"></script>
 <script>
 
 (function() {
   let currentComp = 'all'; // 'all' | 'dsk' | 'blg' | 'gas'
   let searchQuery = '';
-  let selectedGalaxyName = 'NGC5005';
+  let selectedGalaxyName = getUrlGalaxy(DATA, 'NGC5005');
   let sortKey = 'meanAbsAll';
   let sortAsc = true;
   let overviewBars = [];
+  let hoveredGalaxyName = null;
 
   const COLOR_DSK = '#ef4444'; // Red   (Disk)
   const COLOR_BLG = '#22c55e'; // Green (Bulge)
@@ -401,7 +132,8 @@
 
   const COMP_META = {
     all: {
-      title: 'Dashboard1: <code>a_classic_tot_claimed</code> vs <code>a_classic_tot_sim</code> (Disk + Bulge + Gas)',
+      title: 'Dashboard1: a_classic_tot_claimed vs a_classic_tot_sim',
+      sub: 'Disk + Bulge + Gas &middot; 175 SPARC Galaxies',
       claimedLabel: 'a_classic_tot_claimed',
       simLabel: 'a_classic_tot_sim',
       sbLabel: 'SB_tot (W/m&sup2;)',
@@ -411,7 +143,8 @@
       dashed: true
     },
     dsk: {
-      title: 'Dashboard1: <code>a_classic_dsk_claimed</code> vs <code>a_classic_dsk_sim</code> (3D Voxel Disk)',
+      title: 'Dashboard1: a_classic_dsk_claimed vs a_classic_dsk_sim',
+      sub: '3D Voxel Stellar Disk &middot; sech&sup2; Vertical Profile',
       claimedLabel: 'a_classic_dsk_claimed',
       simLabel: 'a_classic_dsk_sim',
       sbLabel: 'SB_dsk (W/m&sup2;)',
@@ -421,7 +154,8 @@
       dashed: false
     },
     blg: {
-      title: 'Dashboard1: <code>a_classic_blg_claimed</code> vs <code>a_classic_blg_sim</code> (3D Voxel Bulge)',
+      title: 'Dashboard1: a_classic_blg_claimed vs a_classic_blg_sim',
+      sub: '3D Voxel Spherical Bulge &middot; Abel Inversion',
       claimedLabel: 'a_classic_blg_claimed',
       simLabel: 'a_classic_blg_sim',
       sbLabel: 'SB_blg (W/m&sup2;)',
@@ -431,7 +165,8 @@
       dashed: false
     },
     gas: {
-      title: 'Dashboard1: <code>a_classic_gas_claimed</code> vs <code>a_classic_gas_sim</code> (3D Voxel Flared Gas Disk)',
+      title: 'Dashboard1: a_classic_gas_claimed vs a_classic_gas_sim',
+      sub: '3D Voxel Flared Gas Disk &middot; sech&sup2; Vertical Profile',
       claimedLabel: 'a_classic_gas_claimed',
       simLabel: 'a_classic_gas_sim',
       sbLabel: 'SB_gas (W/m&sup2;)',
@@ -442,22 +177,13 @@
     }
   };
 
+  document.getElementById('header-nav-slot').innerHTML = renderDashboardNav('d1');
+
   function getStat(gal, key) {
     if (gal.stats && gal.stats[currentComp] && gal.stats[currentComp][key] !== undefined) {
       return gal.stats[currentComp][key];
     }
     return gal[key] || 0;
-  }
-
-  function median(arr) {
-    if (!arr.length) return 0;
-    const s = [...arr].sort((a, b) => a - b);
-    const mid = Math.floor(s.length / 2);
-    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-  }
-  function mean(arr) {
-    if (!arr.length) return 0;
-    return arr.reduce((a, b) => a + b, 0) / arr.length;
   }
 
   function renderKPIs() {
@@ -495,21 +221,6 @@
   }
 
   function drawOverviewChart() {
-    const canvas = document.getElementById('overview-canvas');
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const W = rect.width || 900;
-    const H = 230;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-
-    const axisColor = 'rgba(255,255,255,0.12)';
-    const textColor = '#94a3b8';
-
-    ctx.clearRect(0, 0, W, H);
-
     const meta = COMP_META[currentComp];
     const filtered = [...getFilteredData()].sort((a, b) => getStat(a, 'meanAbsAll') - getStat(b, 'meanAbsAll'));
     const compNames = { all: 'All (Disk+Bulge+Gas)', dsk: 'Disk Only', blg: 'Bulge Only', gas: 'Gas Only' };
@@ -520,48 +231,24 @@
       <span><i class="legend-dot" style="background:${COLOR_ALL}"></i>Selected Galaxy</span>
     `;
 
-    const ml = 46, mr = 16, mt = 16, mb = 32;
-    const pw = W - ml - mr;
-    const ph = H - mt - mb;
     const maxVal = Math.max(15, ...filtered.map(d => Math.min(25, getStat(d, 'meanAbsAll'))));
-
-    const ticks = [0, 5, 10, 15, 20];
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    ticks.forEach(t => {
-      if (t > maxVal) return;
-      const y = mt + ph - (t / maxVal) * ph;
-      ctx.strokeStyle = t === 5 ? 'rgba(255,255,255,0.30)' : axisColor;
-      ctx.setLineDash(t === 5 ? [4, 4] : []);
-      ctx.beginPath();
-      ctx.moveTo(ml, y);
-      ctx.lineTo(ml + pw, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = textColor;
-      ctx.fillText(t + '%', ml - 6, y + 3);
+    overviewBars = drawRankedOverviewCanvas({
+      canvas: document.getElementById('overview-canvas'),
+      height: 230,
+      ml: 46,
+      items: filtered,
+      getVal: d => getStat(d, 'meanAbsAll'),
+      maxVal,
+      ticks: [0, 5, 10, 15, 20],
+      refTick: 5,
+      refColor: 'rgba(255,255,255,0.30)',
+      barColor: meta.barColor,
+      selectedColor: COLOR_ALL,
+      selectedName: selectedGalaxyName,
+      hoveredName: hoveredGalaxyName,
+      hoverLabel: 'Mean |diff_sim|',
+      footerText: 'Galaxies ranked from lowest to highest mean |diff_sim| (click any bar to inspect)'
     });
-
-    overviewBars = [];
-    const n = filtered.length || 1;
-    const barStep = pw / n;
-    const barW = Math.max(1.5, barStep - (n > 80 ? 1 : 2));
-
-    filtered.forEach((d, idx) => {
-      const val = getStat(d, 'meanAbsAll');
-      const clamped = Math.min(maxVal, val);
-      const bh = (clamped / maxVal) * ph;
-      const bx = ml + idx * barStep;
-      const by = mt + ph - bh;
-
-      ctx.fillStyle = d.name === selectedGalaxyName ? COLOR_ALL : meta.barColor;
-      ctx.fillRect(bx, by, barW, Math.max(2, bh));
-      overviewBars.push({ x: bx, w: barStep, gal: d });
-    });
-
-    ctx.fillStyle = textColor;
-    ctx.textAlign = 'center';
-    ctx.fillText('Galaxies ranked from lowest to highest mean |diff_sim| (click any bar to inspect)', ml + pw / 2, H - 8);
   }
 
   function drawProfileInspector() {
@@ -570,10 +257,11 @@
 
     const meta = COMP_META[currentComp];
     document.getElementById('main-title').innerHTML = meta.title;
-    document.getElementById('inspector-title').textContent =
-      `${gal.name} — ${meta.claimedLabel} vs ${meta.simLabel}`;
-    document.getElementById('pt-table-title').textContent =
-      `${gal.name} — Point-by-Point Table (${gal.n} radii)`;
+    document.getElementById('sub-title').innerHTML = meta.sub;
+    document.getElementById('inspector-title').innerHTML =
+      `${galaxy3DLink(gal.name)} — ${meta.claimedLabel} vs ${meta.simLabel}`;
+    document.getElementById('pt-table-title').innerHTML =
+      `${galaxy3DLink(gal.name)} — Point-by-Point Table (${gal.n} radii)`;
 
     if (currentComp === 'all') {
       document.getElementById('inspector-legend').innerHTML = `
@@ -602,6 +290,7 @@
       : '';
 
     document.getElementById('inspector-meta').innerHTML =
+      `3D Voxel Model: ${galaxy3DLink(gal.name)} &nbsp;|&nbsp; ` +
       `has_blg: <b>${gal.has_blg}</b> &nbsp;|&nbsp; ` +
       `rmax: <b>${gal.rmax.toExponential(2)} m</b> &nbsp;|&nbsp; ` +
       `r_dsk_efold: <b>${gal.r_dsk_efold.toExponential(2)} m</b> &nbsp;|&nbsp; ` +
@@ -614,23 +303,7 @@
       `Mean |diff_sim|: <b>${allVal.toFixed(2)}%</b>`;
 
     const canvas = document.getElementById('profile-canvas');
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const W = rect.width || 540;
-    const H = 280;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-
-    const gridColor = 'rgba(255,255,255,0.09)';
-    const textColor = '#94a3b8';
-
-    ctx.clearRect(0, 0, W, H);
-
-    const ml = 68, mr = 18, mt = 18, mb = 42;
-    const pw = W - ml - mr;
-    const ph = H - mt - mb;
+    const { ctx, W, H } = setupHiDPICanvas(canvas, 540, 280);
 
     const pts = gal.pts;
     const rmax = gal.rmax || 1;
@@ -652,46 +325,7 @@
     const yBot = amin < 0 ? amin * 1.15 : 0;
     const ySpan = (yTop - yBot) || 1e-12;
 
-    function xpx(r) { return ml + (r / rmax) * pw; }
-    function ypx(a) { return mt + ph - ((a - yBot) / ySpan) * ph; }
-
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    for (let i = 0; i <= 4; i++) {
-      const av = yBot + (i / 4) * ySpan;
-      const y = ypx(av);
-      ctx.strokeStyle = gridColor;
-      ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + pw, y); ctx.stroke();
-      ctx.fillStyle = textColor;
-      ctx.fillText(av.toExponential(1), ml - 6, y + 3);
-    }
-
-    if (yBot < 0) {
-      const y0 = ypx(0);
-      ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-      ctx.beginPath(); ctx.moveTo(ml, y0); ctx.lineTo(ml + pw, y0); ctx.stroke();
-    }
-
-    ctx.textAlign = 'center';
-    for (let i = 0; i <= 4; i++) {
-      const rv = (i / 4) * rmax;
-      const x = xpx(rv);
-      ctx.strokeStyle = gridColor;
-      ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, mt + ph); ctx.stroke();
-      ctx.fillStyle = textColor;
-      ctx.fillText(rv.toExponential(1), x, mt + ph + 15);
-    }
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.strokeRect(ml, mt, pw, ph);
-
-    ctx.fillStyle = textColor;
-    ctx.fillText('r (m)', ml + pw / 2, H - 6);
-    ctx.save();
-    ctx.translate(14, mt + ph / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText('a (m/s²)', 0, 0);
-    ctx.restore();
+    const { xpx, ypx } = drawDashboardProfileGrid(ctx, W, H, rmax, yBot, ySpan, 'r (m)', 'a (m/s²)');
 
     function plotSeries(acField, asimField, lineColor, dotColor, dashed, dotRadius) {
       ctx.save();
@@ -772,7 +406,7 @@
       const last = getStat(d, 'lastPct');
       const clsAll = all < 5 ? 'good' : (all < 10 ? 'warn' : 'bad');
       return `<tr class="gal-row ${sel}" data-name="${d.name}">
-        <td><b>${d.name}</b></td>
+        <td>${galaxy3DLink(d.name)}</td>
         <td><span class="badge ${d.has_blg ? 'badge-bulge' : 'badge-disk'}">${d.has_blg ? 'true' : 'false'}</span></td>
         <td>${d.n}</td>
         <td>${d.rmax.toExponential(2)}</td>
@@ -793,9 +427,14 @@
         updateAll();
       });
     });
+    updateSortHeaders('#gal-table', sortKey, sortAsc);
   }
 
   function updateAll() {
+    const activePool = currentComp === 'blg' ? DATA.filter(d => d.has_blg) : DATA;
+    if (activePool.length && !activePool.some(d => d.name === selectedGalaxyName)) {
+      selectedGalaxyName = activePool[0].name;
+    }
     document.querySelectorAll('.chip').forEach(c => {
       c.classList.toggle('active', c.getAttribute('data-gal') === selectedGalaxyName);
     });
@@ -803,6 +442,7 @@
     drawOverviewChart();
     drawProfileInspector();
     renderTable();
+    syncUrlAndNavLinks(selectedGalaxyName);
   }
 
   document.querySelectorAll('#comp-group .btn').forEach(btn => {
@@ -810,52 +450,34 @@
       document.querySelectorAll('#comp-group .btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentComp = btn.getAttribute('data-comp');
+      updateAll();
+    });
+  });
 
-      // When switching to Bulge Only, ensure selected galaxy has a bulge
-      if (currentComp === 'blg') {
-        const curGal = DATA.find(d => d.name === selectedGalaxyName);
-        if (!curGal || !curGal.has_blg) {
-          selectedGalaxyName = 'NGC5005';
-        }
+  bindDashboardInteractions({
+    onSearch: (q) => { searchQuery = q; updateAll(); },
+    onChipSelect: (name) => {
+      selectedGalaxyName = name;
+      const gal = DATA.find(d => d.name === name);
+      if (currentComp === 'blg' && gal && !gal.has_blg) {
+        currentComp = 'all';
+        document.querySelectorAll('#comp-group .btn').forEach(b => {
+          b.classList.toggle('active', b.getAttribute('data-comp') === 'all');
+        });
       }
       updateAll();
-    });
-  });
-
-  document.getElementById('search-input').addEventListener('input', (e) => {
-    searchQuery = e.target.value.trim();
-    updateAll();
-  });
-
-  document.querySelectorAll('.chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      selectedGalaxyName = chip.getAttribute('data-gal');
-      updateAll();
-    });
-  });
-
-  document.querySelectorAll('#gal-table th[data-sort]').forEach(th => {
-    th.addEventListener('click', () => {
-      const k = th.getAttribute('data-sort');
+    },
+    onSort: (k) => {
       if (sortKey === k) sortAsc = !sortAsc;
       else { sortKey = k; sortAsc = true; }
       renderTable();
-    });
-  });
-
-  document.getElementById('overview-canvas').addEventListener('click', (e) => {
-    const rect = e.target.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const hit = overviewBars.find(b => x >= b.x && x <= b.x + b.w);
-    if (hit) {
-      selectedGalaxyName = hit.gal.name;
-      updateAll();
-    }
-  });
-
-  window.addEventListener('resize', () => {
-    drawOverviewChart();
-    drawProfileInspector();
+    },
+    getOverviewBars: () => overviewBars,
+    getHoveredName: () => hoveredGalaxyName,
+    setHoveredName: (name) => { hoveredGalaxyName = name; },
+    onBarSelect: (name) => { selectedGalaxyName = name; updateAll(); },
+    drawOverview: drawOverviewChart,
+    drawProfile: drawProfileInspector
   });
 
   updateAll();
